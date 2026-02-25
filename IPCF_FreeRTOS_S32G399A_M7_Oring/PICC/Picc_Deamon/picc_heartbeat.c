@@ -14,10 +14,11 @@ extern "C" {
 #endif
 
 #include "picc_heartbeat.h"
-#include "picc_stack.h"
+#include "FreeRTOS.h"
 #include "Picc_main.h"    /* For HANDLE_ERROR */
 #include "ipcf_Ip_Cfg_Defines.h"  /* For IPCF_INSTANCE0 */
-#include "FreeRTOS.h"
+#include "picc_stack.h"
+
 /* NOTE: timers.h removed - no longer using FreeRTOS timers */
 
 /*==================================================================================================
