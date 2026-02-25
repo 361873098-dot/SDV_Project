@@ -37,9 +37,10 @@ void EcuM_PreOS_Init(void);
  * @brief Start RTOS and create tasks
  *
  * Creates all application tasks and starts the RTOS scheduler:
- * - EcuM_PostOS_Init_Task (priority 4) - One-time RTOS-dependent init
- * - App_Rx_Msg_10ms_Task (priority 3) - RX message processing
- * - EcuM_Period_10ms_Task (priority 2) - Periodic task
+ * - EcuM_PostOS_Init_Task (priority 4) - One-time RTOS-dependent init (PICC
+ * module)
+ * - PICC_Rx_Msg_Task (priority 3) - IPCF RX message processing
+ * - EcuM_Period_10ms_Task (priority 2) - Periodic task (CAN, PICC, Power SM)
  *
  * @note This function does not return (scheduler takes over)
  */

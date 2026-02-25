@@ -16,12 +16,10 @@ extern "C"{
 /*==================================================================================================
  *                                         Header Includes
  *==================================================================================================*/
-#include "Mcu.h"
-/* MCU/Platform initialization */
+
 #include "Mcal.h"
 #include "Platform.h"
-#include "CDD_Pmic.h"
-#include "CDD_I2c.h"
+
 
 /* Application headers */
 #include "Picc_main.h"
@@ -58,16 +56,13 @@ extern "C"{
 #define RX_TASK_STACK_SIZE          (192U)  // 768B
 #define PERIODIC_TASK_STACK_SIZE    (256U)  // 1KB
 
-
 /** Control channel configuration */
 #define CTRL_CHAN_ID            (0U)
 #define CTRL_CHAN_SIZE          (64U)
 
 /** Maximum message length */
-#define MAX_MSG_LEN             (PICC_STACK_MAX_SIZE)
 
-/** Wait timeout */
-#define WAIT_TIMEOUT            (1000U / portTICK_PERIOD_MS)
+#define MAX_MSG_LEN             (PICC_STACK_MAX_SIZE)
 
 /*==================================================================================================
  *                                         Private Type Definitions
@@ -117,16 +112,7 @@ volatile uint8 exit_code;
 
 uint32 task_M7_0_10ms_cnt = 0;
 
-uint16 read_m_deviceid;
-uint16 read_m_mode;
-uint16 read_m_flag1;
-uint16 read_m_flag2;
-uint16 read_m_flag3_0;
-uint16 read_m_flag3;
-uint16 read_fs_state;
-uint16 read_m_otp_vpre;
-uint32 TestLoopCnt = 999999999;
-uint32 loop_cnt = 0;
+
 /*==================================================================================================
  *                                         FreeRTOS Static Memory
  *==================================================================================================*/
@@ -380,9 +366,6 @@ static void App_Rx_Msg_10ms_Task(void *params)
     sint8 err;
 
     (void)params;
-
-  
-
     /* Main loop - process received messages */
     while (1) {
         if (xQueueReceive(g_rxQueue, &rxMsg, portMAX_DELAY) == pdPASS) {
@@ -570,58 +553,7 @@ void vApplicationStackOverflowHook(TaskHandle_t pxTask, char *pcTaskName)
 /**
  * @brief Application entry point
  */
-int main(void)
-{
 
-    /* Initialize pins */
-   Port_Init(NULL_PTR);
-
-    /* Platform initialization */
-    Platform_Init(NULL_PTR);
-
-    /* Initialize I2c driver */
-    I2c_Init(NULL_PTR);
-
-	/* Initialize Pmic driver */
-	Pmic_Init(NULL_PTR);
-
-	/* Install Gpio ISR */
-
-   /* Initialize Vr5510 device */
-	Pmic_InitDevice(PmicConf_PmicDevice_PmicDevice_0);
-
-
-	/*	Read FLAG3 Register	*/
-  Pmic_ReadRegister(PmicConf_PmicDevice_PmicDevice_0, PMIC_MAIN_UNIT, PMIC_VR55XX_M_FLAG3_ADDR8, &read_m_flag3_0);
-  /*	Read M_DEVICEID Register	*/
-  Pmic_ReadRegister(PmicConf_PmicDevice_PmicDevice_0, PMIC_MAIN_UNIT, PMIC_VR55XX_M_DEVICEID_ADDR8, &read_m_deviceid);
-
-  /*	Read M_MODE Register	*/
-  Pmic_ReadRegister(PmicConf_PmicDevice_PmicDevice_0, PMIC_MAIN_UNIT, PMIC_VR55XX_M_MODE_ADDR8, &read_m_mode);
-
-  /*	Read M_FLAG Register	*/
-  Pmic_ReadRegister(PmicConf_PmicDevice_PmicDevice_0, PMIC_MAIN_UNIT, PMIC_VR55XX_M_FLAG1_ADDR8, &read_m_flag1);
-  Pmic_ReadRegister(PmicConf_PmicDevice_PmicDevice_0, PMIC_MAIN_UNIT, PMIC_VR55XX_M_FLAG2_ADDR8, &read_m_flag2);
-  Pmic_ReadRegister(PmicConf_PmicDevice_PmicDevice_0, PMIC_MAIN_UNIT, PMIC_VR55XX_M_FLAG3_ADDR8, &read_m_flag3);
-
-  Pmic_ReadRegister(PmicConf_PmicDevice_PmicDevice_0, PMIC_MAIN_UNIT, PMIC_VR55XX_M_CFG_VPRE_2_OTP_ADDR8, &read_m_otp_vpre);
-
-  /*	Read FS_STATE Register	*/
-  Pmic_ReadRegister(PmicConf_PmicDevice_PmicDevice_0, PMIC_FAIL_SAFE_UNIT, PMIC_VR55XX_FS_STATES_ADDR8, &read_fs_state);
-
-
-    /* Start main task */
-    PICC_Mian_Task();
-
-    /* Main loop (normally won't reach here) */
-    for (;;) {
-    	if (exit_code != 0) {
-            break;
-        }
-    }
-    
-    return exit_code;
-}
 
 #if defined(__cplusplus)
 }

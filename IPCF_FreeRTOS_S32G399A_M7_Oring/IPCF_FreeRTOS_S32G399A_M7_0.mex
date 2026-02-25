@@ -111,48 +111,7 @@
                      </feature>
                   </dependency>
                </dependencies>
-               <pins>
-                  <pin peripheral="CAN_0" signal="rxd" pin_num="F15" pin_signal="PC_11">
-                     <pin_features>
-                        <pin_feature name="pullEnable" value="enabled"/>
-                        <pin_feature name="pullSelect" value="pullUp"/>
-                     </pin_features>
-                  </pin>
-                  <pin peripheral="CAN_0" signal="txd" pin_num="G11" pin_signal="PC_12">
-                     <pin_features>
-                        <pin_feature name="pullEnable" value="enabled"/>
-                        <pin_feature name="pullSelect" value="pullUp"/>
-                        <pin_feature name="InitValue" value="state_1"/>
-                     </pin_features>
-                  </pin>
-                  <pin peripheral="DSPI_5" signal="pcs0" pin_num="A9" pin_signal="PK_11">
-                     <pin_features>
-                        <pin_feature name="direction" value="OUTPUT"/>
-                        <pin_feature name="pullEnable" value="enabled"/>
-                        <pin_feature name="pullSelect" value="pullUp"/>
-                        <pin_feature name="InitValue" value="state_1"/>
-                     </pin_features>
-                  </pin>
-                  <pin peripheral="DSPI_5" signal="sclk, 5" pin_num="F10" pin_signal="PK_15">
-                     <pin_features>
-                        <pin_feature name="direction" value="OUTPUT"/>
-                        <pin_feature name="pullSelect" value="pullUp"/>
-                        <pin_feature name="InitValue" value="state_0"/>
-                     </pin_features>
-                  </pin>
-                  <pin peripheral="DSPI_5" signal="sout, 5" pin_num="C9" pin_signal="PK_13">
-                     <pin_features>
-                        <pin_feature name="pullSelect" value="pullUp"/>
-                        <pin_feature name="InitValue" value="state_1"/>
-                     </pin_features>
-                  </pin>
-                  <pin peripheral="DSPI_5" signal="sin, 5" pin_num="B13" pin_signal="PK_14">
-                     <pin_features>
-                        <pin_feature name="pullEnable" value="enabled"/>
-                        <pin_feature name="pullSelect" value="pullUp"/>
-                     </pin_features>
-                  </pin>
-               </pins>
+               <pins/>
             </function>
          </functions_list>
       </pins>
@@ -3029,6 +2988,126 @@
                                        <setting name="PortPinDirection" value="PORT_PIN_OUT"/>
                                        <setting name="PortPinInitialMode" value="PORT_GPIO_MODE"/>
                                        <setting name="PortPinMode" value="GPIO"/>
+                                       <setting name="PortPinLevelValue" value="PORT_PIN_LEVEL_HIGH"/>
+                                       <setting name="PortPinSlewRate" value="SRE_3_3V_50MHZ_b100"/>
+                                       <array name="PortPinEcucPartitionRef"/>
+                                    </struct>
+                                    <struct name="4">
+                                       <setting name="Name" value="CAN0_Rxd_PC_11"/>
+                                       <setting name="PortPinPue" value="true"/>
+                                       <setting name="PortPinPus" value="true"/>
+                                       <setting name="PortPinSafeMode" value="false"/>
+                                       <setting name="PortPinOde" value="false"/>
+                                       <setting name="PortPinWithReadBack" value="true"/>
+                                       <setting name="PortPinRcvr" value="false"/>
+                                       <setting name="PortPinDirectionChangeable" value="false"/>
+                                       <setting name="PortPinModeChangeable" value="true"/>
+                                       <setting name="PortPinSiul2Instance" value="SIUL2_0"/>
+                                       <setting name="PortPinId" value="5"/>
+                                       <setting name="PortPinPcr" value="43"/>
+                                       <setting name="PortPinDirection" value="PORT_PIN_IN"/>
+                                       <setting name="PortPinInitialMode" value="PORT_GPIO_MODE"/>
+                                       <setting name="PortPinMode" value="FLEXCAN_0_CAN0_RX"/>
+                                       <setting name="PortPinLevelValue" value="PORT_PIN_LEVEL_HIGH"/>
+                                       <setting name="PortPinSlewRate" value="SRE_3_3V_50MHZ_b100"/>
+                                       <array name="PortPinEcucPartitionRef"/>
+                                    </struct>
+                                    <struct name="5">
+                                       <setting name="Name" value="CAN0_Txd_PC_12"/>
+                                       <setting name="PortPinPue" value="true"/>
+                                       <setting name="PortPinPus" value="true"/>
+                                       <setting name="PortPinSafeMode" value="false"/>
+                                       <setting name="PortPinOde" value="false"/>
+                                       <setting name="PortPinWithReadBack" value="false"/>
+                                       <setting name="PortPinRcvr" value="false"/>
+                                       <setting name="PortPinDirectionChangeable" value="true"/>
+                                       <setting name="PortPinModeChangeable" value="true"/>
+                                       <setting name="PortPinSiul2Instance" value="SIUL2_0"/>
+                                       <setting name="PortPinId" value="6"/>
+                                       <setting name="PortPinPcr" value="44"/>
+                                       <setting name="PortPinDirection" value="PORT_PIN_OUT"/>
+                                       <setting name="PortPinInitialMode" value="PORT_GPIO_MODE"/>
+                                       <setting name="PortPinMode" value="FLEXCAN_0_CAN0_TX"/>
+                                       <setting name="PortPinLevelValue" value="PORT_PIN_LEVEL_HIGH"/>
+                                       <setting name="PortPinSlewRate" value="SRE_3_3V_50MHZ_b100"/>
+                                       <array name="PortPinEcucPartitionRef"/>
+                                    </struct>
+                                    <struct name="6">
+                                       <setting name="Name" value="DSPI_5_CS0_PK_11"/>
+                                       <setting name="PortPinPue" value="true"/>
+                                       <setting name="PortPinPus" value="true"/>
+                                       <setting name="PortPinSafeMode" value="false"/>
+                                       <setting name="PortPinOde" value="false"/>
+                                       <setting name="PortPinWithReadBack" value="false"/>
+                                       <setting name="PortPinRcvr" value="false"/>
+                                       <setting name="PortPinDirectionChangeable" value="true"/>
+                                       <setting name="PortPinModeChangeable" value="true"/>
+                                       <setting name="PortPinSiul2Instance" value="SIUL2_1"/>
+                                       <setting name="PortPinId" value="7"/>
+                                       <setting name="PortPinPcr" value="171"/>
+                                       <setting name="PortPinDirection" value="PORT_PIN_OUT"/>
+                                       <setting name="PortPinInitialMode" value="PORT_GPIO_MODE"/>
+                                       <setting name="PortPinMode" value="DSPI_5_DSPI5_PCS0_OUT"/>
+                                       <setting name="PortPinLevelValue" value="PORT_PIN_LEVEL_HIGH"/>
+                                       <setting name="PortPinSlewRate" value="SRE_3_3V_50MHZ_b100"/>
+                                       <array name="PortPinEcucPartitionRef"/>
+                                    </struct>
+                                    <struct name="7">
+                                       <setting name="Name" value="DSPI_5_SCLK_PK_15"/>
+                                       <setting name="PortPinPue" value="false"/>
+                                       <setting name="PortPinPus" value="true"/>
+                                       <setting name="PortPinSafeMode" value="false"/>
+                                       <setting name="PortPinOde" value="false"/>
+                                       <setting name="PortPinWithReadBack" value="false"/>
+                                       <setting name="PortPinRcvr" value="false"/>
+                                       <setting name="PortPinDirectionChangeable" value="true"/>
+                                       <setting name="PortPinModeChangeable" value="true"/>
+                                       <setting name="PortPinSiul2Instance" value="SIUL2_1"/>
+                                       <setting name="PortPinId" value="8"/>
+                                       <setting name="PortPinPcr" value="175"/>
+                                       <setting name="PortPinDirection" value="PORT_PIN_OUT"/>
+                                       <setting name="PortPinInitialMode" value="PORT_GPIO_MODE"/>
+                                       <setting name="PortPinMode" value="DSPI_5_DSPI5_SCK_OUT"/>
+                                       <setting name="PortPinLevelValue" value="PORT_PIN_LEVEL_LOW"/>
+                                       <setting name="PortPinSlewRate" value="SRE_3_3V_50MHZ_b100"/>
+                                       <array name="PortPinEcucPartitionRef"/>
+                                    </struct>
+                                    <struct name="8">
+                                       <setting name="Name" value="DSPI_5_SOUT_PK_13"/>
+                                       <setting name="PortPinPue" value="false"/>
+                                       <setting name="PortPinPus" value="true"/>
+                                       <setting name="PortPinSafeMode" value="false"/>
+                                       <setting name="PortPinOde" value="false"/>
+                                       <setting name="PortPinWithReadBack" value="false"/>
+                                       <setting name="PortPinRcvr" value="false"/>
+                                       <setting name="PortPinDirectionChangeable" value="true"/>
+                                       <setting name="PortPinModeChangeable" value="true"/>
+                                       <setting name="PortPinSiul2Instance" value="SIUL2_1"/>
+                                       <setting name="PortPinId" value="9"/>
+                                       <setting name="PortPinPcr" value="173"/>
+                                       <setting name="PortPinDirection" value="PORT_PIN_OUT"/>
+                                       <setting name="PortPinInitialMode" value="PORT_GPIO_MODE"/>
+                                       <setting name="PortPinMode" value="DSPI_5_DSPI5_SOUT"/>
+                                       <setting name="PortPinLevelValue" value="PORT_PIN_LEVEL_HIGH"/>
+                                       <setting name="PortPinSlewRate" value="SRE_3_3V_50MHZ_b100"/>
+                                       <array name="PortPinEcucPartitionRef"/>
+                                    </struct>
+                                    <struct name="9">
+                                       <setting name="Name" value="DSPI_5_SIN_PK_14"/>
+                                       <setting name="PortPinPue" value="true"/>
+                                       <setting name="PortPinPus" value="true"/>
+                                       <setting name="PortPinSafeMode" value="false"/>
+                                       <setting name="PortPinOde" value="false"/>
+                                       <setting name="PortPinWithReadBack" value="false"/>
+                                       <setting name="PortPinRcvr" value="false"/>
+                                       <setting name="PortPinDirectionChangeable" value="false"/>
+                                       <setting name="PortPinModeChangeable" value="true"/>
+                                       <setting name="PortPinSiul2Instance" value="SIUL2_1"/>
+                                       <setting name="PortPinId" value="10"/>
+                                       <setting name="PortPinPcr" value="174"/>
+                                       <setting name="PortPinDirection" value="PORT_PIN_IN"/>
+                                       <setting name="PortPinInitialMode" value="PORT_GPIO_MODE"/>
+                                       <setting name="PortPinMode" value="DSPI_5_DSPI5_SIN"/>
                                        <setting name="PortPinLevelValue" value="PORT_PIN_LEVEL_HIGH"/>
                                        <setting name="PortPinSlewRate" value="SRE_3_3V_50MHZ_b100"/>
                                        <array name="PortPinEcucPartitionRef"/>

@@ -14,11 +14,13 @@ extern "C" {
 #endif
 
 #include "picc_link.h"
-#include "picc_stack.h"
-#include "Picc_main.h"    /* For HANDLE_ERROR */
-#include "ipc-shm.h"
-#include "ipcf_Ip_Cfg_Defines.h"  /* For IPCF_INSTANCE0 */
 #include "FreeRTOS.h"
+#include "Picc_main.h" /* For HANDLE_ERROR */
+#include "ipc-shm.h"
+#include "ipcf_Ip_Cfg_Defines.h" /* For IPCF_INSTANCE0 */
+#include "picc_stack.h"
+#include "task.h" /* For taskENTER_CRITICAL, taskEXIT_CRITICAL */
+
 /* NOTE: timers.h removed - no longer using FreeRTOS timers */
 
 /*==================================================================================================

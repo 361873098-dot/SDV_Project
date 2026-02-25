@@ -1601,16 +1601,22 @@ PORT_CONFIG_PB \
 #define PortConf_PortPin_I2C4_SDA 1
 #define PortConf_PortPin_IGN_KEY 2
 #define PortConf_PortPin_VR5510_PWRON2 3
+#define PortConf_PortPin_CAN0_Rxd_PC_11 4
+#define PortConf_PortPin_CAN0_Txd_PC_12 5
+#define PortConf_PortPin_DSPI_5_CS0_PK_11 6
+#define PortConf_PortPin_DSPI_5_SCLK_PK_15 7
+#define PortConf_PortPin_DSPI_5_SOUT_PK_13 8
+#define PortConf_PortPin_DSPI_5_SIN_PK_14 9
 
 /**
 * @brief The maximum number of configured pins
 */
-#define PORT_MAX_CONFIGURED_PADS_U16   ((uint16)4)
+#define PORT_MAX_CONFIGURED_PADS_U16   ((uint16)10)
 
 /**
 * @brief Number of UnUsed pin array
 */
-#define PORT_MAX_UNUSED_PADS_U16    (138U)
+#define PORT_MAX_UNUSED_PADS_U16    (132U)
 /**
 * @brief Port driver Pre-Compile configuration switch
 */
