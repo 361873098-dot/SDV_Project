@@ -22,19 +22,17 @@ extern "C" {
 
 #define ECUM_PERIODIC_TASK_STACK_SIZE (256U) /* 1KB */
 
-
-
 /*==================================================================================================
  *                                         INCLUDE FILES
  *==================================================================================================*/
 
 #include "FlexCAN_Ip_main.h"
+#include "EcuM_main_init.h" /* For EcuM_Diag_Update() */
 #include "FlexCAN_Ip.h"
 #include "Mcal.h"
 #include "TJA1145A_Spi_Baremetal.h"
 
 #include <string.h>
-
 
 /*==================================================================================================
  *                                         GLOBAL VARIABLES
@@ -51,7 +49,6 @@ volatile uint32 g_canRxCount2 = 0;
 /** Task execution counter (for debugging) */
 uint32 EcuM_Period_10ms_cnt = 0;
 
-
 /*==================================================================================================
  *                                         PRIVATE VARIABLES
  *==================================================================================================*/
@@ -60,9 +57,8 @@ uint32 EcuM_Period_10ms_cnt = 0;
 static uint8 g_txData0[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
 static uint8 g_txData1[8] = {0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18};
 
-static uint8 g_RxData0[8]={0};
-static uint8 g_RxData1[8]={0};
-
+static uint8 g_RxData0[8] = {0};
+static uint8 g_RxData1[8] = {0};
 
 /** RX message buffer structures for 2 RX channels */
 static Flexcan_Ip_MsgBuffType g_rxBuffer0;
@@ -271,19 +267,15 @@ void AINFC_Can_Cyclic_10ms(void) {
   (void)AINFC_Can_TxMsg(0U, AINFC_TX_MB1, g_txData1);
 }
 
-
-
-
-
 /*==================================================================================================
- *										   PUBLIC FUNCTIONS
+ *										   PUBLIC
+ * FUNCTIONS
  *==================================================================================================*/
 
 /**
  * @brief 10ms Periodic Task
  */
-void AINFC_CAN_Period_10ms_Task(void *pvParameters) 
-{
+void AINFC_CAN_Period_10ms_Task(void *pvParameters) {
   TickType_t xLastWakeTime;
   const TickType_t xPeriod = pdMS_TO_TICKS(10); /* 10ms period */
 
@@ -293,48 +285,51 @@ void AINFC_CAN_Period_10ms_Task(void *pvParameters)
   xLastWakeTime = xTaskGetTickCount();
 
   for (;;) {
-	EcuM_Period_10ms_cnt++;
+    EcuM_Period_10ms_cnt++;
 
-	/* ====================================================================
-	 * TJA1145 Periodic Test (every 100ms = every 10 iterations)
-	 * For SPI waveform debugging with oscilloscope
-	 * ==================================================================== */
-	if ((EcuM_Period_10ms_cnt % 10U) == 0U) {
-	  Spi_Baremetal_Tja1145_PeriodicTest();
-	}
+    /* ====================================================================
+     * TJA1145 Periodic Test (every 100ms = every 10 iterations)
+     * For SPI waveform debugging with oscilloscope
+     * ==================================================================== */
+    if ((EcuM_Period_10ms_cnt % 10U) == 0U) {
+      Spi_Baremetal_Tja1145_PeriodicTest();
+    }
 
-	/* ====================================================================
-	 * AINFC CAN Periodic Processing (2 TX + 2 RX)
-	 * ==================================================================== */
-	AINFC_Can_Cyclic_10ms();
+    /* ====================================================================
+     * AINFC CAN Periodic Processing (2 TX + 2 RX)
+     * ==================================================================== */
+    AINFC_Can_Cyclic_10ms();
 
-	/* ====================================================================
-	 * Wait until next 10ms period - allows lower priority tasks to run
-	 * ==================================================================== */
-	vTaskDelayUntil(&xLastWakeTime, xPeriod);
+    /* ====================================================================
+     * RTOS Diagnostics Update (period: ECUM_DIAG_UPDATE_PERIOD_MS)
+     * ==================================================================== */
+    if ((EcuM_Period_10ms_cnt % (ECUM_DIAG_UPDATE_PERIOD_MS / 10U)) == 0U) {
+      EcuM_Diag_Update();
+    }
+
+    /* ====================================================================
+     * Wait until next 10ms period - allows lower priority tasks to run
+     * ==================================================================== */
+    vTaskDelayUntil(&xLastWakeTime, xPeriod);
   }
 }
 
+void AINFC_CAN_Main_task(void) {
 
-void AINFC_CAN_Main_task(void) 
-{
+  BaseType_t os_status;
 
-	BaseType_t os_status;
-
-	/* ========================================================================
-	 * Create EcuM_Period_10ms_Task (periodic task)
-	 * Priority 2 - runs after RX task processes messages
-	 * ======================================================================== */
-	os_status = xTaskCreate((TaskFunction_t)AINFC_CAN_Period_10ms_Task, "ANIFC_CAN_10ms",
-							ECUM_PERIODIC_TASK_STACK_SIZE, NULL,
-							tskIDLE_PRIORITY + 2, NULL);
-	if (os_status != pdPASS) {
-	  while (1) {
-	  }
-	}
-
+  /* ========================================================================
+   * Create EcuM_Period_10ms_Task (periodic task)
+   * Priority 2 - runs after RX task processes messages
+   * ======================================================================== */
+  os_status = xTaskCreate((TaskFunction_t)AINFC_CAN_Period_10ms_Task,
+                          "ANIFC_CAN_10ms", ECUM_PERIODIC_TASK_STACK_SIZE, NULL,
+                          tskIDLE_PRIORITY + 2, NULL);
+  if (os_status != pdPASS) {
+    while (1) {
+    }
+  }
 }
-
 
 #ifdef __cplusplus
 }

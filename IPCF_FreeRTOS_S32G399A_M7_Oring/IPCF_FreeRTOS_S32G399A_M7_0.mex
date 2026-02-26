@@ -1412,14 +1412,14 @@
                            <setting name="configUSE_IDLE_HOOK" value="false"/>
                            <setting name="configUSE_TICK_HOOK" value="false"/>
                            <setting name="configUSE_MALLOC_FAILED_HOOK" value="false"/>
-                           <setting name="configCHECK_FOR_STACK_OVERFLOW" value="0"/>
+                           <setting name="configCHECK_FOR_STACK_OVERFLOW" value="2"/>
                            <setting name="configUSE_DAEMON_TASK_STARTUP_HOOK" value="false"/>
                         </struct>
                         <struct name="rttsgrd_tab">
                            <struct name="configGENERATE_RUN_TIME_STATS_id">
-                              <setting name="configGENERATE_RUN_TIME_STATS" value="false"/>
-                              <setting name="portCONFIGURE_TIMER_FOR_RUN_TIME_STATS" value=""/>
-                              <setting name="portGET_RUN_TIME_COUNTER_VALUE" value="xTaskGetTickCount()"/>
+                              <setting name="configGENERATE_RUN_TIME_STATS" value="true"/>
+                              <setting name="portCONFIGURE_TIMER_FOR_RUN_TIME_STATS" value="vMainConfigureTimerForRunTimeStats()"/>
+                              <setting name="portGET_RUN_TIME_COUNTER_VALUE" value="ulMainGetRunTimeCounterValue()"/>
                            </struct>
                            <setting name="configUSE_TRACE_FACILITY" value="true"/>
                            <setting name="configUSE_STATS_FORMATTING_FUNCTIONS" value="true"/>
