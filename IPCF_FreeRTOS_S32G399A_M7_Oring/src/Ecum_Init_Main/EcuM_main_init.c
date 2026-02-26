@@ -49,7 +49,7 @@ extern "C" {
  *==================================================================================================*/
 
 /* CAN IRQ handler - defined in FlexCAN_Ip_Irq.c */
-extern void CAN0_ORED_0_7_MB_IRQHandler(void);
+//extern void CAN0_ORED_0_7_MB_IRQHandler(void);
 
 /*==================================================================================================
  *                                         INIT  VARIABLES
@@ -98,6 +98,8 @@ int main(void) {
   FlexCAN_Process_Init();
 
   Spi_Baremetal_Tja1145_SetCanActive();
+
+  AINFC_CAN_Period_10ms_Main();
 
   /* Start main task */
   PICC_Mian_Task();

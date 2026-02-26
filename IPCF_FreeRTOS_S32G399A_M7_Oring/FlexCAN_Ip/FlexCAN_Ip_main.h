@@ -100,9 +100,9 @@ unsigned char AINFC_Can_RxMsgL(unsigned char Bus_ID, unsigned char Mbx,
  * @brief 10ms periodic CAN processing
  *
  * Handles 2 TX and 2 RX message cyclic processing.
- * Called from EcuM_Period_10ms_Task.
+ * 
  */
-void AINFC_Can_Cyclic_10ms(void);
+void AINFC_CAN_Period_10ms_Main(void);
 
 #ifdef __cplusplus
 }

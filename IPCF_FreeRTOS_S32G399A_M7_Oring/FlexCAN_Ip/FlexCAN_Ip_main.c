@@ -16,6 +16,13 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+/*==================================================================================================
+ *                                         MACRO DEFINITIONS
+ *==================================================================================================*/
+
+#define ECUM_PERIODIC_TASK_STACK_SIZE (256U) /* 1KB */
+
+
 
 /*==================================================================================================
  *                                         INCLUDE FILES
@@ -24,6 +31,8 @@ extern "C" {
 #include "FlexCAN_Ip_main.h"
 #include "FlexCAN_Ip.h"
 #include "Mcal.h"
+#include "TJA1145A_Spi_Baremetal.h"
+
 #include <string.h>
 
 
@@ -38,6 +47,10 @@ volatile uint32 g_canTxCount2 = 0;
 /** RX counters (for debugging) */
 volatile uint32 g_canRxCount = 0;
 volatile uint32 g_canRxCount2 = 0;
+
+/** Task execution counter (for debugging) */
+uint32 EcuM_Period_10ms_cnt = 0;
+
 
 /*==================================================================================================
  *                                         PRIVATE VARIABLES
@@ -257,6 +270,74 @@ void AINFC_Can_Cyclic_10ms(void) {
   g_txData1[1] = (uint8)((g_canTxCount2 >> 8) & 0xFFU);
   (void)AINFC_Can_TxMsg(0U, AINFC_TX_MB1, g_txData1);
 }
+
+
+
+
+
+/*==================================================================================================
+ *										   PUBLIC FUNCTIONS
+ *==================================================================================================*/
+
+/**
+ * @brief 10ms Periodic Task
+ */
+void AINFC_CAN_Period_10ms_Task(void *pvParameters) 
+{
+  TickType_t xLastWakeTime;
+  const TickType_t xPeriod = pdMS_TO_TICKS(10); /* 10ms period */
+
+  (void)pvParameters;
+
+  /* Initialize the xLastWakeTime variable with current time */
+  xLastWakeTime = xTaskGetTickCount();
+
+  for (;;) {
+	EcuM_Period_10ms_cnt++;
+
+	/* ====================================================================
+	 * TJA1145 Periodic Test (every 100ms = every 10 iterations)
+	 * For SPI waveform debugging with oscilloscope
+	 * ==================================================================== */
+	if ((EcuM_Period_10ms_cnt % 10U) == 0U) {
+	  Spi_Baremetal_Tja1145_PeriodicTest();
+	}
+
+	/* ====================================================================
+	 * AINFC CAN Periodic Processing (2 TX + 2 RX)
+	 * ==================================================================== */
+	AINFC_Can_Cyclic_10ms();
+
+	/* ====================================================================
+	 * Wait until next 10ms period - allows lower priority tasks to run
+	 * ==================================================================== */
+	vTaskDelayUntil(&xLastWakeTime, xPeriod);
+  }
+}
+
+
+void AINFC_CAN_Period_10ms_Main(void) 
+{
+
+	BaseType_t os_status;
+
+	/* ========================================================================
+	 * Create EcuM_Period_10ms_Task (periodic task)
+	 * Priority 2 - runs after RX task processes messages
+	 * ======================================================================== */
+	os_status = xTaskCreate((TaskFunction_t)AINFC_CAN_Period_10ms_Task, "ANIFC_CAN_10ms",
+							ECUM_PERIODIC_TASK_STACK_SIZE, NULL,
+							tskIDLE_PRIORITY + 2, NULL);
+	if (os_status != pdPASS) {
+	  while (1) {
+	  }
+	}
+
+
+}
+
+
+
 
 #ifdef __cplusplus
 }

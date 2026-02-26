@@ -60,21 +60,21 @@ ENTRY(Reset_Handler)
 
 MEMORY
 {
-    int_itcm                : ORIGIN = 0x00000000, LENGTH = 0x00000000 /* 0KB - Not Supported */
-    int_dtcm                : ORIGIN = 0x20000000, LENGTH = 0x0000E000 /* 64K */
-    int_dtcm_stack          : ORIGIN = 0x2000E000, LENGTH = 0x00002000 /* 8K */
-    int_sram_shareable      : ORIGIN = 0x22C00000, LENGTH = 0x00004000 /* 16KB */
-    IPCFsharedRAM (RW)      : ORIGIN = 0x34100000, LENGTH = 0x00200000 /* 2MB */
-    int_sram                : ORIGIN = 0x34400000, LENGTH = 0x00200000 /* 2MB */
-    int_sram_no_cacheable   : ORIGIN = 0x34600000, LENGTH = 0x00100000 /* 1MB, needs to include int_results  */
-    ram_rsvd2               : ORIGIN = 0x34700000, LENGTH = 0x00CFFFFF /* End of SRAM */
-
-    LLCE_CAN_SHAREDMEMORY   : ORIGIN = 0x43800000 LENGTH = 0x3C800
-    LLCE_LIN_SHAREDMEMORY   : ORIGIN = 0x4383C800 LENGTH = 0xa0
-    LLCE_BOOT_END           : ORIGIN = 0x4383C8A0 LENGTH = 0x50
-    LLCE_MEAS_SHAREDMEMORY  : ORIGIN = 0x4384FFDF LENGTH = 0x20
+    int_itcm                : ORIGIN = 0x00000000, LENGTH = 0x00000000    /* 0KB - Not Supported */
+    int_dtcm                : ORIGIN = 0x20000000, LENGTH = 0x0000E000    /* 56KB */
+    int_dtcm_stack          : ORIGIN = 0x2000E000, LENGTH = 0x00002000    /* 8KB */
+    int_sram_shareable      : ORIGIN = 0x22C00000, LENGTH = 0x00004000    /* 16KB */
+    
+    IPCFsharedRAM (RW)      : ORIGIN = 0x34000000, LENGTH = 0x00100000    /* 1MB */
+    int_sram                : ORIGIN = 0x34100000, LENGTH = 0x00280000    /* 2.5MB - increased from 2MB */   
+    int_sram_no_cacheable   : ORIGIN = 0x34380000, LENGTH = 0x00080000    /* 512KB - reduced */
+    ram_rsvd2               : ORIGIN = 0x34400000, LENGTH = 0x00400000    /* 4MB - unchanged */
+    
+    LLCE_CAN_SHAREDMEMORY   : ORIGIN = 0x43800000, LENGTH = 0x3C800
+    LLCE_LIN_SHAREDMEMORY   : ORIGIN = 0x4383C800, LENGTH = 0xa0
+    LLCE_BOOT_END           : ORIGIN = 0x4383C8A0, LENGTH = 0x50
+    LLCE_MEAS_SHAREDMEMORY  : ORIGIN = 0x4384FFDF, LENGTH = 0x20
 }
-
 
 SECTIONS
 {
