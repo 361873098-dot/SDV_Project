@@ -1,0 +1,90 @@
+; =============================================================================
+; CAN Traffic & Status Inspector
+; =============================================================================
+
+AREA.CLEAR
+AREA.CREATE CAN_INSPECT 200. 120.
+AREA.SELECT CAN_INSPECT
+AREA.VIEW CAN_INSPECT
+
+PRINT "============================================================"
+PRINT "   FlexCAN Traffic & Status Inspector"
+PRINT "============================================================"
+
+; 1. FlexCAN Status
+LOCAL &CAN0_BASE
+&CAN0_BASE=0x401B4000
+LOCAL &can_mcr &can_esr1 &can_ecr
+&can_mcr=Data.Long(D:&CAN0_BASE+0x00)
+&can_esr1=Data.Long(D:&CAN0_BASE+0x20)
+&can_ecr=Data.Long(D:&CAN0_BASE+0x1C)
+
+PRINT ""
+PRINT "HEAD: FlexCAN Status"
+PRINT "MCR  = 0x" FORMAT.HEX(8, &can_mcr)
+PRINT "ESR1 = 0x" FORMAT.HEX(8, &can_esr1)
+LOCAL &fltconf &txerr &rxerr
+&fltconf=(&can_esr1>>4.)&0x3
+&txerr=&can_ecr&0xFF
+&rxerr=(&can_ecr>>8.)&0xFF
+
+IF &fltconf==0
+  PRINT "  State: Error Active (OK)"
+ELSE IF &fltconf==1
+  PRINT "  State: Error Passive"
+ELSE
+  PRINT "  State: BUS OFF (CRITICAL)"
+
+PRINT "ECR  = 0x" FORMAT.HEX(8, &can_ecr) " (TX Err=" &txerr " RX Err=" &rxerr ")"
+PRINT ""
+
+; 2. Application Counters & Flags
+PRINT "HEAD: Application Counters"
+LOCAL &tx_cnt &rx_cnt &tx_busy &rx_conf
+&tx_cnt=Var.VALUE(g_canTxCount)
+&rx_cnt=Var.VALUE(g_canRxCount)
+&tx_busy=Var.VALUE(g_canTxBusy)
+&rx_conf=Var.VALUE(g_canRxConfigured)
+
+PRINT "g_canTxCount = " &tx_cnt
+PRINT "g_canRxCount = " &rx_cnt
+PRINT "g_canTxBusy  = " &tx_busy
+PRINT "g_canRxConfigured = " &rx_conf
+
+IF &tx_busy==1
+  PRINT "  [INFO] TX Busy is TRUE - Waiting for previous transmission to complete"
+  IF &fltconf==3
+    PRINT "  [WARN] TX stuck because controller is BUS OFF!"
+ELSE
+  PRINT "  [INFO] TX Busy is FALSE - Ready to send"
+PRINT ""
+
+; 3. Data Buffers
+PRINT "HEAD: Packet Content"
+PRINT "TX Data (ID: 0x100):"
+LOCAL &i &data
+&i=0
+RePeaT 8
+(
+  &data=Var.VALUE(g_canTxData[&i])
+  PRINT "  Byte " &i ": 0x" FORMAT.HEX(2, &data)
+  &i=&i+1
+)
+
+PRINT ""
+PRINT "RX Buffer (ID: 0x200):"
+LOCAL &rx_id &rx_len
+&rx_id=Var.VALUE(g_canRxBuffer.msgId)
+&rx_len=Var.VALUE(g_canRxBuffer.dataLen)
+PRINT "  MsgID: 0x" FORMAT.HEX(8, &rx_id) " Len: " &rx_len
+&i=0
+RePeaT 8
+(
+  &data=Var.VALUE(g_canRxBuffer.data[&i])
+  PRINT "  Byte " &i ": 0x" FORMAT.HEX(2, &data)
+  &i=&i+1
+)
+
+PRINT ""
+PRINT "Done."
+ENDDO

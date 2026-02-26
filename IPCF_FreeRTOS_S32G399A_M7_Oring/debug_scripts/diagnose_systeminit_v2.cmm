@@ -1,0 +1,97 @@
+;==================================================================================================
+; TRACE32 Script: 极简诊断 v2.7
+;==================================================================================================
+AREA.Create DIAG
+AREA.Select DIAG
+AREA.Clear
+AREA.view DIAG
+
+LOCAL &pc &lr &sp &msp &psp
+LOCAL &r0 &r1 &r2 &r3 &r12
+LOCAL &xpsr &control &primask
+
+&pc=REGISTER(PC)
+&lr=REGISTER(LR)
+&sp=REGISTER(SP)
+&msp=REGISTER(MSP)
+&psp=REGISTER(PSP)
+&r0=REGISTER(R0)
+&r1=REGISTER(R1)
+&r2=REGISTER(R2)
+&r3=REGISTER(R3)
+&r12=REGISTER(R12)
+&xpsr=REGISTER(XPSR)
+&control=REGISTER(CONTROL)
+&primask=REGISTER(PRIMASK)
+
+PRINT "[1] CPU寄存器"
+PRINT "PC=0x" FORMAT.HEX(8,&pc) " LR=0x" FORMAT.HEX(8,&lr)
+PRINT "SP=0x" FORMAT.HEX(8,&sp) " MSP=0x" FORMAT.HEX(8,&msp) " PSP=0x" FORMAT.HEX(8,&psp)
+PRINT "R0=0x" FORMAT.HEX(8,&r0) " R1=0x" FORMAT.HEX(8,&r1) " R2=0x" FORMAT.HEX(8,&r2)
+PRINT "R3=0x" FORMAT.HEX(8,&r3) " R12=0x" FORMAT.HEX(8,&r12)
+PRINT "XPSR=0x" FORMAT.HEX(8,&xpsr) " CONTROL=0x" FORMAT.HEX(8,&control) " PRIMASK=0x" FORMAT.HEX(8,&primask)
+
+LOCAL &stack_start &stack_end
+&stack_start=ADDRESS.OFFSET(__Stack_dtcm_start)
+&stack_end=ADDRESS.OFFSET(__Stack_dtcm_end)
+
+PRINT ""
+PRINT "[2] 栈配置"
+PRINT "Stack Start=0x" FORMAT.HEX(8,&stack_start) " End=0x" FORMAT.HEX(8,&stack_end) " Size=" %DECIMAL (&stack_start-&stack_end) "B"
+
+IF &msp==&stack_start
+  PRINT "⚠️ MSP=Stack_Start (栈未使用)"
+ELSE IF &msp>&stack_start
+  PRINT "❌ MSP>Stack_Start (栈越界)"
+ELSE IF &msp<&stack_end
+  PRINT "❌ MSP<Stack_End (栈溢出)"
+ELSE
+  PRINT "✓ MSP正常, 已用=" %DECIMAL (&stack_start-&msp) "B, 剩余=" %DECIMAL (&msp-&stack_end) "B"
+
+PRINT ""
+PRINT "[3] LR分析"
+IF &lr==0xFFFFFFF1
+  PRINT "LR=异常返回(Handler->MSP)"
+ELSE IF &lr==0xFFFFFFF9
+  PRINT "LR=异常返回(Thread->MSP)"
+ELSE IF &lr==0xFFFFFFFD
+  PRINT "LR=异常返回(Thread->PSP)"
+ELSE IF (&lr&0x1)==0
+  PRINT "⚠️ LR LSB=0, 可能INVSTATE"
+ELSE
+  PRINT "LR=普通返回地址"
+
+PRINT ""
+PRINT "[4] XPSR分析"
+LOCAL &exception_num &thumb_bit
+&exception_num=&xpsr&0x1FF
+&thumb_bit=(&xpsr>>24)&0x1
+PRINT "Exception=" %DECIMAL &exception_num " T=" %DECIMAL &thumb_bit
+IF &exception_num==3
+  PRINT "❌ HardFault!"
+ELSE IF &exception_num==4
+  PRINT "❌ MemManage!"
+ELSE IF &exception_num==5
+  PRINT "❌ BusFault!"
+ELSE IF &exception_num==6
+  PRINT "❌ UsageFault!"
+IF &thumb_bit==0
+  PRINT "❌ T=0 导致INVSTATE!"
+
+PRINT ""
+PRINT "[5] 关键函数"
+LOCAL &main_addr &systeminit_addr
+&main_addr=ADDRESS.OFFSET(main)
+&systeminit_addr=ADDRESS.OFFSET(SystemInit)
+PRINT "main()=0x" FORMAT.HEX(8,&main_addr) " SystemInit()=0x" FORMAT.HEX(8,&systeminit_addr)
+
+PRINT ""
+PRINT "[6] 手动执行"
+PRINT "Data.dump 0xE000ED28 ;CFSR"
+PRINT "Data.dump 0xE000ED2C ;HFSR"
+PRINT "Frame.view ;调用栈"
+
+PRINT ""
+PRINT "诊断完成"
+
+ENDDO

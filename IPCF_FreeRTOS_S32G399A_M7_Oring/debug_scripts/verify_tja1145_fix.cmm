@@ -1,0 +1,67 @@
+; TJA1145 Initialization Verification Script
+; Checks the status of TJA1145 after initialization fix
+
+; Open a new window for results
+WinPOS 0. 0. 50. 20.
+Area.Create TJA1145_Check
+Area.Select TJA1145_Check
+Area.Clear TJA1145_Check
+
+PRINT "Checking TJA1145 Initialization Status..."
+
+; Ensure symbols are loaded (User should have loaded them)
+; If not, we rely on address (but address changes). We assume symbols.
+
+IF !SYMBOL.EXIST(g_Spi_Baremetal_Debug)
+(
+    PRINT %ERROR "Symbol g_Spi_Baremetal_Debug not found! Please load symbols."
+    ENDDO
+)
+
+; Read variables
+&init_step = Var.Value(g_Spi_Baremetal_Debug.tja_init_step)
+&error_code = Var.Value(g_Spi_Baremetal_Debug.tja_error_code)
+&main_status = Var.Value(g_Spi_Baremetal_Debug.tja_R03_main_status)
+&mode_ctrl = Var.Value(g_Spi_Baremetal_Debug.tja_R01_mode_ctrl)
+&can_ctrl = Var.Value(g_Spi_Baremetal_Debug.tja_R20_can_ctrl)
+&device_id = Var.Value(g_Spi_Baremetal_Debug.tja_R7E_device_id)
+
+PRINT "----------------------------------------"
+PRINT "TJA1145 Status:"
+PRINT "----------------------------------------"
+PRINT "Init Step: " &init_step " (Expected 9)"
+PRINT "Error Code: " &error_code " (Expected 0)"
+PRINT "Device ID: " &device_id " (Expected 112/0x70 or 116/0x74)"
+PRINT "Main Status (0x03): " &main_status
+PRINT "  -> NMS (Bit 5): " ((&main_status>>5)&1)
+PRINT "Mode Control (0x01): " &mode_ctrl " (Expected 7 for Normal)"
+PRINT "CAN Control (0x20): " &can_ctrl " (Expected 1 for Active)"
+
+PRINT "----------------------------------------"
+IF &error_code==0&&((&main_status>>5)&1)==1
+(
+    PRINT %COLOR.GREEN "SUCCESS: TJA1145 is in Normal Mode (NMS=1)!"
+)
+ELSE
+(
+    PRINT %COLOR.RED "FAILURE: TJA1145 Init Failed!"
+    IF &error_code==1
+        PRINT "Reason: NMS bit did not set (Stuck in Standby/Sleep)."
+    IF &error_code==2
+        PRINT "Reason: Invalid Device ID."
+    IF &error_code==3
+        PRINT "Reason: Recovery Failed."
+)
+
+; Detailed Events
+&sys_event = Var.Value(g_Spi_Baremetal_Debug.tja_R61_sys_event)
+&trans_event = Var.Value(g_Spi_Baremetal_Debug.tja_R63_trans_event)
+&trans_status = Var.Value(g_Spi_Baremetal_Debug.tja_R22_trans_status)
+
+PRINT "----------------------------------------"
+PRINT "Diagnostics:"
+PRINT "System Event: " &sys_event
+PRINT "Transceiver Event: " &trans_event
+PRINT "Transceiver Status: " &trans_status " (CPNERR=" ((&trans_status>>6)&1) ", CTS=" ((&trans_status>>7)&1) ")"
+
+ENDDO

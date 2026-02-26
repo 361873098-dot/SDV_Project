@@ -1,0 +1,174 @@
+;==================================================================================================
+; TRACE32 分步诊断脚本 v2.4
+;==================================================================================================
+AREA.RESet
+AREA.Create DIAG 200. 1000.
+AREA.Select DIAG
+AREA.view DIAG
+AREA.Clear DIAG
+PRINT ""
+PRINT "S32G3 M7 HardFault 分步诊断 v2.4"
+PRINT ""
+;====================================================================================
+; 步骤 0: 检查 CPU 连接
+;====================================================================================
+PRINT "[步骤 0] 检查 CPU 连接..."
+IF !SYSTEM.UP()
+(
+  PRINT "  CPU 未连接,正在连接..."
+  SYStem.Up
+  WAIT 500.ms
+)
+IF SYSTEM.UP()
+  PRINT "  [OK] CPU 已连接"
+ELSE
+(
+  PRINT "  [ERROR] CPU 连接失败"
+  ENDDO
+)
+; 加载ELF
+LOCAL &elf_path
+&elf_path="D:\MySandbox\FlexCAN_Ip_Example_S32G399A_M7\Debug_RAM\FlexCAN_Ip_Example_S32G399A_M7.elf"
+IF !OS.FILE(&elf_path)
+  &elf_path="D:\MySandbox\FlexCAN_Ip_Example_S32G399A_M7\Debug\FlexCAN_Ip_Example_S32G399A_M7.elf"
+IF OS.FILE(&elf_path)
+(
+  Data.LOAD.Elf &elf_path /NoCODE
+  PRINT "  [OK] 符号已加载"
+)
+ELSE
+  PRINT "  [WARN] 未找到ELF"
+PRINT ""
+;====================================================================================
+; 步骤 1: 设置断点
+;====================================================================================
+PRINT "[步骤 1] 设置断点..."
+Break.Delete /ALL
+Break.Set main /Onchip
+Break.Set HardFault_Handler /Onchip
+Break.Set SystemInit /Onchip
+Break.Set EcuM_PreOS_Init /Onchip
+Break.Set Clock_Ip_Init /Onchip
+Break.Set vTaskStartScheduler /Onchip
+PRINT "  已设置 6 个断点"
+PRINT ""
+;====================================================================================
+; 步骤 2: 复位并运行
+;====================================================================================
+PRINT "[步骤 2] 复位 CPU 并运行..."
+SYStem.Down
+WAIT 200.ms
+SYStem.Up
+WAIT 500.ms
+Go
+WAIT 5.s
+IF STATE.RUN()
+  Break
+PRINT ""
+;====================================================================================
+; 步骤 3: 分析停止位置
+;====================================================================================
+PRINT "[步骤 3] 分析停止位置..."
+PRINT ""
+LOCAL &pc &sp &lr
+&pc=R(PC)
+&sp=R(SP)
+&lr=R(LR)
+PRINT "  PC = 0x" %HEX &pc
+PRINT "  SP = 0x" %HEX &sp  
+PRINT "  LR = 0x" %HEX &lr
+; 获取关键地址
+LOCAL &addr_hardfault &addr_main &addr_systeminit
+&addr_hardfault=ADDRESS.OFFSET(HardFault_Handler)
+&addr_main=ADDRESS.OFFSET(main)
+&addr_systeminit=ADDRESS.OFFSET(SystemInit)
+PRINT ""
+; 判断位置并给出诊断
+IF &pc==&addr_hardfault
+(
+  PRINT "  >>> 停在 HardFault_Handler <<<"
+  PRINT ""
+  GOSUB FaultAnalysis
+)
+ELSE IF &pc==&addr_main
+(
+  PRINT "  >>> 停在 main() - 启动成功! <<<"
+)
+ELSE IF &pc==&addr_systeminit
+(
+  PRINT "  >>> 停在 SystemInit() <<<"
+)
+ELSE
+(
+  PRINT "  >>> 停在其他位置 <<<"
+  PRINT ""
+  PRINT "  尝试识别当前函数..."
+  ; 显示当前位置的代码
+  Data.List &pc
+)
+PRINT ""
+PRINT "诊断完成"
+PRINT ""
+ENDDO
+;====================================================================================
+; Fault 分析子程序
+;====================================================================================
+FaultAnalysis:
+  LOCAL &msp &psp
+  &msp=R(MSP)
+  &psp=R(PSP)
+  
+  PRINT "  MSP = 0x" %HEX &msp
+  PRINT "  PSP = 0x" %HEX &psp
+  
+  ; Fault 寄存器
+  LOCAL &hfsr &cfsr
+  &hfsr=Data.Long(D:0xE000ED2C)
+  &cfsr=Data.Long(D:0xE000ED28)
+  
+  PRINT ""
+  PRINT "  HFSR = 0x" %HEX &hfsr
+  PRINT "  CFSR = 0x" %HEX &cfsr
+  LOCAL &ufsr
+  &ufsr=(&cfsr>>16.)&0xFFFF
+  
+  PRINT ""
+  PRINT "  Fault 类型:"
+  IF (&ufsr&0x0002)!=0
+    PRINT "    - INVSTATE (Thumb/ARM 模式错误)"
+  IF (&ufsr&0x0001)!=0
+    PRINT "    - UNDEFINSTR (未定义指令)"
+  IF (&ufsr&0x0004)!=0
+    PRINT "    - INVPC (非法PC)"
+  IF (&ufsr&0x0008)!=0
+    PRINT "    - NOCP (无协处理器)"
+    
+  ; 从栈恢复
+  LOCAL &exception_sp &stacked_pc &stacked_lr &stacked_xpsr
+  
+  IF (&lr&0x4)==0
+    &exception_sp=&msp
+  ELSE
+    &exception_sp=&psp
+  
+  &stacked_pc=Data.Long(D:&exception_sp+0x18)
+  &stacked_lr=Data.Long(D:&exception_sp+0x14)
+  &stacked_xpsr=Data.Long(D:&exception_sp+0x1C)
+  
+  PRINT ""
+  PRINT "  异常前状态 (从栈恢复):"
+  PRINT "    PC   = 0x" %HEX &stacked_pc " <- 故障位置"
+  PRINT "    LR   = 0x" %HEX &stacked_lr " <- 调用者"
+  PRINT "    xPSR = 0x" %HEX &stacked_xpsr
+  
+  IF (&stacked_xpsr&0x01000000)==0
+  (
+    PRINT ""
+    PRINT "  *** xPSR.T = 0! Thumb位未设置! ***"
+    PRINT "  这是 INVSTATE 的直接原因"
+  )
+  
+  PRINT ""
+  PRINT "  故障位置代码:"
+  Data.List &stacked_pc
+  RETURN

@@ -102,7 +102,7 @@ unsigned char AINFC_Can_RxMsgL(unsigned char Bus_ID, unsigned char Mbx,
  * Handles 2 TX and 2 RX message cyclic processing.
  * 
  */
-void AINFC_CAN_Period_10ms_Main(void);
+void AINFC_CAN_Main_task(void);
 
 #ifdef __cplusplus
 }

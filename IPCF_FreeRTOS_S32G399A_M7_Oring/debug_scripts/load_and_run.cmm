@@ -1,0 +1,20 @@
+; ============================================
+; FlexCAN M7 Load and Run Script
+; ============================================
+
+; 1. Load ELF file
+Data.LOAD.Elf "D:\MySandbox\SDV_Project\IPCF_FreeRTOS_S32G399A_M7_Oring\Debug_RAM\IPCF_FreeRTOS_S32G399A_M7_Oring.elf"
+
+; 2. Set VTOR to vector table address
+Data.Set D:0xE000ED08 %Long 0x34380400
+
+; 3. Set PC to Reset_Handler (Thumb mode, LSB=1)
+Register.Set PC 0x34100011
+
+; 4. Set SP to initial stack pointer
+Register.Set SP 0x20010000
+
+; 5. Run
+Go
+
+ENDDO

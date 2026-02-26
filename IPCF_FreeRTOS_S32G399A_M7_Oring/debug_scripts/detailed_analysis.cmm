@@ -1,0 +1,32 @@
+;==================================================================================================
+; TRACE32 最简分析脚本 - 仅显示寄存器
+;==================================================================================================
+AREA.Select DIAG
+AREA.Clear DIAG
+PRINT ""
+PRINT "HardFault 寄存器分析"
+PRINT ""
+PRINT "核心寄存器:"
+PRINT "  PC  = 0x" %HEX R(PC)
+PRINT "  SP  = 0x" %HEX R(SP)
+PRINT "  LR  = 0x" %HEX R(LR)
+PRINT "  MSP = 0x" %HEX R(MSP)
+PRINT "  PSP = 0x" %HEX R(PSP)
+PRINT ""
+PRINT "通用寄存器:"
+PRINT "  R0  = 0x" %HEX R(R0)
+PRINT "  R1  = 0x" %HEX R(R1)
+PRINT "  R2  = 0x" %HEX R(R2)
+PRINT "  R3  = 0x" %HEX R(R3)
+PRINT "  R12 = 0x" %HEX R(R12)
+PRINT ""
+PRINT "函数地址:"
+PRINT "  SystemInit  = 0x" %HEX ADDRESS.OFFSET(SystemInit)
+PRINT "  main        = 0x" %HEX ADDRESS.OFFSET(main)
+PRINT "  SVC_Handler = 0x" %HEX ADDRESS.OFFSET(SVC_Handler)
+PRINT ""
+PRINT "LR 指向的代码 (调用者):"
+Data.List (R(LR)&0xFFFFFFFE)
+PRINT ""
+PRINT "完成 - 请查看上方代码窗口"
+ENDDO

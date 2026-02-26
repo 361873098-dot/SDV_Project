@@ -1,0 +1,147 @@
+; =============================================================================
+; pk14_miso_diagnostic.cmm - TRACE32 script to diagnose PK_14 (MISO) pin
+; =============================================================================
+; PK_14 = Pin index 174 in SIUL2_1
+; SIUL2_1 base address: 0x44010000
+; MSCR offset: 0x240 (for MSCR[0])
+; MSCR174 offset: 0x240 + (174 * 4) = 0x240 + 0x2B8 = 0x4F8
+; Full address: 0x44010000 + 0x4F8 = 0x440104F8
+;
+; IMCR1007 for DSPI5_SIN:
+; IMCR base in SIUL2_1: 0xA40 (for IMCR[0] in SIUL2_1)
+; IMCR index in SIUL2_1: 1007 - 512 = 495
+; IMCR495 offset: 0xA40 + (495 * 4) = 0xA40 + 0x7BC = 0x11FC
+; Full address: 0x44010000 + 0x11FC = 0x440111FC
+; =============================================================================
+
+AREA.CREATE pk14_diag 200. 80.
+AREA.SELECT pk14_diag
+AREA.CLEAR pk14_diag
+
+PRINT "============================================================"
+PRINT "  PK_14 (MISO) Pin Diagnostic"
+PRINT "============================================================"
+PRINT ""
+
+; Read MSCR174 for PK_14
+LOCAL &mscr174_addr
+LOCAL &mscr174_val
+&mscr174_addr=0x440104F8
+&mscr174_val=DATA.LONG(D:&mscr174_addr)
+
+PRINT "MSCR174 (PK_14) Address: 0x" FORMAT.HEX(8.,&mscr174_addr)
+PRINT "MSCR174 Value: 0x" FORMAT.HEX(8.,&mscr174_val)
+PRINT ""
+
+; Decode MSCR174 bits
+LOCAL &obe &ibe &pue &pus &sre &sss
+&obe=(&mscr174_val>>21.)&1.
+&ibe=(&mscr174_val>>19.)&1.
+&pue=(&mscr174_val>>13.)&1.
+&pus=(&mscr174_val>>12.)&1.
+&sre=(&mscr174_val>>14.)&0xF
+&sss=(&mscr174_val)&0x7
+
+PRINT "MSCR174 Bit Decode:"
+PRINT "  OBE (Output Buffer Enable): " FORMAT.DECIMAL(1.,&obe) " (0=disabled, 1=enabled)"
+PRINT "  IBE (Input Buffer Enable):  " FORMAT.DECIMAL(1.,&ibe) " (0=DISABLED, 1=enabled) <-- CRITICAL!"
+PRINT "  PUE (Pull Enable):          " FORMAT.DECIMAL(1.,&pue) " (0=disabled, 1=enabled)"
+PRINT "  PUS (Pull Select):          " FORMAT.DECIMAL(1.,&pus) " (0=pull-down, 1=pull-up)"
+PRINT "  SRE (Slew Rate):            " FORMAT.DECIMAL(1.,&sre)
+PRINT "  SSS (Source Signal Select): " FORMAT.DECIMAL(1.,&sss) " (0=GPIO, 3=DSPI5_SIN)"
+PRINT ""
+
+; Check IBE status
+IF &ibe==0
+(
+    PRINT "!!! WARNING: IBE=0 - Input Buffer is DISABLED !!!"
+    PRINT "    TJA1145 MISO data CANNOT reach the SPI peripheral!"
+    PRINT ""
+)
+ELSE
+(
+    PRINT "OK: IBE=1 - Input Buffer is Enabled"
+    PRINT ""
+)
+
+; Read IMCR1007 for DSPI5_SIN routing
+LOCAL &imcr1007_addr
+LOCAL &imcr1007_val
+&imcr1007_addr=0x440111FC
+&imcr1007_val=DATA.LONG(D:&imcr1007_addr)
+
+PRINT "IMCR1007 (DSPI5_SIN) Address: 0x" FORMAT.HEX(8.,&imcr1007_addr)
+PRINT "IMCR1007 Value: 0x" FORMAT.HEX(8.,&imcr1007_val)
+PRINT ""
+
+LOCAL &imcr_sss
+&imcr_sss=(&imcr1007_val)&0x7
+
+PRINT "IMCR1007 Bit Decode:"
+PRINT "  SSS (Source Signal Select): " FORMAT.DECIMAL(1.,&imcr_sss)
+PRINT "    0 = no route"
+PRINT "    3 = PK_14 (DSPI5_SIN) <-- Expected!"
+PRINT ""
+
+IF &imcr_sss!=3
+(
+    PRINT "!!! WARNING: IMCR1007 SSS != 3 !!!"
+    PRINT "    MISO signal is NOT routed from PK_14 to DSPI5!"
+    PRINT ""
+)
+ELSE
+(
+    PRINT "OK: IMCR1007 SSS=3 - PK_14 routed to DSPI5_SIN"
+    PRINT ""
+)
+
+; Also read other SPI5 pins for reference
+PRINT "============================================================"
+PRINT "  Other SPI5 Pins for Reference"
+PRINT "============================================================"
+PRINT ""
+
+; PK_11 (CS/PCS0) - pin 171
+LOCAL &mscr171_addr &mscr171_val
+&mscr171_addr=0x440104EC
+&mscr171_val=DATA.LONG(D:&mscr171_addr)
+PRINT "MSCR171 (PK_11/CS):  0x" FORMAT.HEX(8.,&mscr171_val)
+
+; PK_13 (MOSI) - pin 173
+LOCAL &mscr173_addr &mscr173_val
+&mscr173_addr=0x440104F4
+&mscr173_val=DATA.LONG(D:&mscr173_addr)
+PRINT "MSCR173 (PK_13/MOSI): 0x" FORMAT.HEX(8.,&mscr173_val)
+
+; PK_14 (MISO) - pin 174
+PRINT "MSCR174 (PK_14/MISO): 0x" FORMAT.HEX(8.,&mscr174_val)
+
+; PK_15 (SCK) - pin 175
+LOCAL &mscr175_addr &mscr175_val
+&mscr175_addr=0x440104FC
+&mscr175_val=DATA.LONG(D:&mscr175_addr)
+PRINT "MSCR175 (PK_15/SCK):  0x" FORMAT.HEX(8.,&mscr175_val)
+
+PRINT ""
+PRINT "============================================================"
+PRINT "  Summary"
+PRINT "============================================================"
+IF &ibe==0
+(
+    PRINT "PROBLEM: PK_14 IBE=0, MISO input buffer is disabled!"
+    PRINT "FIX: Check .mex file or manually set IBE=1"
+)
+ELSE IF &imcr_sss!=3
+(
+    PRINT "PROBLEM: IMCR1007 not routing PK_14 to DSPI5_SIN!"
+    PRINT "FIX: Set IMCR1007 SSS=3 to route PK_14"
+)
+ELSE
+(
+    PRINT "Pin configuration looks OK."
+    PRINT "If SPI still not working, check other factors."
+)
+
+AREA.VIEW pk14_diag
+
+ENDDO

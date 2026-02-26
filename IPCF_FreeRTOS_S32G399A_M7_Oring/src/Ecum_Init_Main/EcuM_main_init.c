@@ -99,7 +99,7 @@ int main(void) {
 
   Spi_Baremetal_Tja1145_SetCanActive();
 
-  AINFC_CAN_Period_10ms_Main();
+  AINFC_CAN_Main_task();
 
   /* Start main task */
   PICC_Mian_Task();

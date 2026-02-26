@@ -1,0 +1,180 @@
+;==================================================================================================
+; TRACE32 快速测试脚本 - 验证HardFault修复
+;==================================================================================================
+; 用途: 自动加载程序,设置断点,并运行诊断
+; 使用: DO debug_scripts/quick_test.cmm
+;==================================================================================================
+PRINT "========================================================================"
+PRINT "HardFault修复 - 快速测试脚本"
+PRINT "========================================================================"
+PRINT ""
+;====================================================================================
+; 1. 复位系统
+;====================================================================================
+PRINT "【步骤1】复位CPU..." 
+SYStem.Down
+WAIT 200ms
+SYStem.Up
+WAIT 500ms
+PRINT "  ✓ CPU已复位"
+PRINT ""
+;====================================================================================
+; 2. 加载ELF文件
+;====================================================================================
+LOCAL &elf_path
+&elf_path="D:\MySandbox\FlexCAN_Ip_Example_S32G399A_M7\Debug\FlexCAN_Ip_Example_S32G399A_M7.elf"
+PRINT "【步骤2】加载ELF文件..."
+PRINT "  路径: &elf_path"
+IF OS.FILE(&elf_path)
+(
+  Data.LOAD.Elf &elf_path /NOCODE
+  PRINT "  ✓ ELF文件加载成功"
+)
+ELSE
+(
+  PRINT "  ❌ 错误: ELF文件不存在!"
+  PRINT "     请先编译项目"
+  ENDDO
+)
+PRINT ""
+;====================================================================================
+; 3. 设置关键断点
+;====================================================================================
+PRINT "【步骤3】设置断点..."
+; 删除所有旧断点
+Break.Delete /ALL
+; 在main设置断点
+Break.Set main /Onchip
+PRINT "  ✓ main() 断点已设置"
+; 在PreOS_Init设置断点
+Break.Set EcuM_PreOS_Init /Onchip
+PRINT "  ✓ EcuM_PreOS_Init() 断点已设置"
+; 在StartOS设置断点
+Break.Set EcuM_StartOS /Onchip
+PRINT "  ✓ EcuM_StartOS() 断点已设置"
+; 在HardFault_Handler设置断点
+Break.Set HardFault_Handler /Onchip
+PRINT "  ✓ HardFault_Handler() 断点已设置 (用于捕获异常)"
+; 在栈溢出钩子设置断点 
+Break.Set vApplicationStackOverflowHook /Onchip
+PRINT "  ✓ vApplicationStackOverflowHook() 断点已设置"
+PRINT ""
+;====================================================================================
+; 4. 运行到main
+;====================================================================================
+PRINT "【步骤4】运行到main()..."
+Go
+WAIT !STATE.RUN() 10s
+IF STATE.RUN()
+(
+  Break
+  PRINT "  ⚠️ 警告: 10秒内未到达main(),可能卡在启动代码"
+  PRINT "     当前PC = " FORMAT.HEX(8,REGISTER(PC))
+  GOTO check_fault
+)
+LOCAL &current_pc
+&current_pc=REGISTER(PC)
+; 检查是否到达main
+IF &current_pc==ADDRESS.OFFSET(main)
+(
+  PRINT "  ✅ 成功到达main()!"
+  PRINT "     PC = 0x" FORMAT.HEX(8,&current_pc)
+)
+ELSE
+(
+  PRINT "  ❌ 未到达main(),当前位置:"
+  PRINT "     PC = 0x" FORMAT.HEX(8,&current_pc)
+  
+  ; 检查是否在HardFault
+  IF &current_pc==ADDRESS.OFFSET(HardFault_Handler)
+  (
+    PRINT "  ❌ 触发了HardFault!"
+    GOTO check_fault
+  )
+)
+PRINT ""
+;====================================================================================
+; 5. 运行诊断脚本
+;====================================================================================
+PRINT "【步骤5】运行诊断脚本..."
+PRINT ""
+PRINT "========================================================================"
+DO debug_scripts/diagnose_hardfault.cmm
+PRINT "========================================================================"
+PRINT ""
+;====================================================================================
+; 6. 继续执行到StartOS
+;====================================================================================
+PRINT "【步骤6】继续运行到EcuM_StartOS()..."
+Go
+WAIT !STATE.RUN() 5s
+IF STATE.RUN()
+(
+  Break
+  PRINT "  ⚠️ 警告: 未到达EcuM_StartOS()"
+  GOTO end_test
+)
+&current_pc=REGISTER(PC)
+IF &current_pc==ADDRESS.OFFSET(EcuM_StartOS)
+(
+  PRINT "  ✅ 成功到达EcuM_StartOS()!"
+  PRINT "     这意味着PreOS初始化完成,无栈溢出"
+)
+ELSE IF &current_pc==ADDRESS.OFFSET(HardFault_Handler)
+(
+  PRINT "  ❌ 在PreOS阶段触发HardFault!"
+  GOTO check_fault
+)
+PRINT ""
+;====================================================================================
+; 7. 进入FreeRTOS调度器
+;====================================================================================
+PRINT "【步骤7】进入FreeRTOS调度器..."
+PRINT "  按 Go 继续执行..."
+PRINT "  如果程序正常,应该进入FreeRTOS任务调度"
+PRINT ""
+GOTO end_test
+;====================================================================================
+; 异常检查分支
+;====================================================================================
+check_fault:
+PRINT ""
+PRINT "========================================================================"
+PRINT "❌ 检测到HardFault - 运行详细诊断"
+PRINT "========================================================================"
+PRINT ""
+DO debug_scripts/diagnose_hardfault.cmm
+PRINT ""
+PRINT "========================================================================"
+PRINT "故障分析建议:"
+PRINT "========================================================================"
+LOCAL &lr &cfsr &ufsr
+&lr=REGISTER(LR)
+&cfsr=Data.Long(EAHB:0xE000ED28)
+&ufsr=(&cfsr>>16)&0xFFFF
+IF (&lr!=0xFFFFFFF1)&&(&lr!=0xFFFFFFF9)&&(&lr!=0xFFFFFFFD)
+(
+  PRINT "  • LR寄存器损坏 → 可能是栈溢出"
+  PRINT "  • 检查是否正确修改了 linker_ram.ld"
+  PRINT "  • 确认主栈已增加到32KB"
+)
+IF (&ufsr&0x0002)!=0
+(
+  PRINT "  • INVSTATE错误 → 非法指令状态"
+  PRINT "  • 通常由LR损坏引起"
+)
+PRINT ""
+;====================================================================================
+; 结束
+;====================================================================================
+end_test:
+PRINT "========================================================================"
+PRINT "测试完成"
+PRINT "========================================================================"
+PRINT ""
+PRINT "提示:"
+PRINT "  • 如需重新测试: DO debug_scripts/quick_test.cmm"
+PRINT "  • 查看详细诊断: DO debug_scripts/diagnose_hardfault.cmm"
+PRINT "  • 查看修复报告: debug_scripts/FIX_SUMMARY_REPORT.md"
+PRINT ""
+ENDDO

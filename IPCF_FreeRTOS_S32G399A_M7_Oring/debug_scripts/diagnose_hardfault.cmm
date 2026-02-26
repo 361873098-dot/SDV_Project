@@ -1,0 +1,212 @@
+;==================================================================================================
+; TRACE32 Script: HardFault诊断脚本
+;==================================================================================================
+AREA.Create DIAG
+AREA.Select DIAG
+AREA.Clear
+PRINT "========================================================================"
+PRINT "HardFault 深度诊断 - INVSTATE错误"
+PRINT "========================================================================"
+PRINT ""
+;====================================================================================
+; 1. 检查栈配置
+;====================================================================================
+PRINT "【1】栈配置检查:"
+PRINT "------------------------------------------------------------------------"
+LOCAL &stack_start &stack_end &stack_size
+&stack_start=ADDRESS.OFFSET(__Stack_dtcm_start)
+&stack_end=ADDRESS.OFFSET(__Stack_dtcm_end)
+&stack_size=&stack_start-&stack_end
+PRINT "  主栈(MSP)配置:"
+PRINT "    Stack Start  : 0x" FORMAT.HEX(8,&stack_start) " (linker分配)"
+PRINT "    Stack End    : 0x" FORMAT.HEX(8,&stack_end) " (linker分配)"
+PRINT "    Stack Size   : " %DECIMAL &stack_size " 字节 (" %DECIMAL (&stack_size/1024) " KB)"
+LOCAL &current_sp &msp &psp
+&current_sp=REGISTER(SP)
+&msp=REGISTER(MSP)
+&psp=REGISTER(PSP)
+PRINT ""
+PRINT "  当前栈指针:"
+PRINT "    SP (当前)    : 0x" FORMAT.HEX(8,&current_sp)
+PRINT "    MSP (主栈)   : 0x" FORMAT.HEX(8,&msp)
+PRINT "    PSP (进程栈) : 0x" FORMAT.HEX(8,&psp)
+LOCAL &stack_used &stack_free
+&stack_used=&stack_start-&msp
+&stack_free=&msp-&stack_end
+PRINT ""
+PRINT "  栈使用情况:"
+PRINT "    已使用: " %DECIMAL &stack_used " 字节"  
+PRINT "    可用:   " %DECIMAL &stack_free " 字节"
+PRINT "    使用率: " %DECIMAL ((&stack_used*100)/&stack_size) "%"
+IF &stack_free<400
+(
+  PRINT ""
+  PRINT "  ⚠️ 警告: 主栈空间不足400字节！"
+  PRINT "  ⚠️ 这可能导致栈溢出！"
+)
+PRINT ""
+;====================================================================================
+; 2. 检查关键寄存器
+;====================================================================================
+PRINT "【2】关键寄存器状态:"
+PRINT "------------------------------------------------------------------------"
+LOCAL &pc &lr &r0 &r1 &r2 &r3
+&pc=REGISTER(PC)
+&lr=REGISTER(LR)
+&r0=REGISTER(R0)
+&r1=REGISTER(R1)
+&r2=REGISTER(R2)
+&r3=REGISTER(R3)
+PRINT "  PC  = 0x" FORMAT.HEX(8,&pc)
+PRINT "  LR  = 0x" FORMAT.HEX(8,&lr)
+PRINT "  R0  = 0x" FORMAT.HEX(8,&r0)
+PRINT "  R1  = 0x" FORMAT.HEX(8,&r1)
+PRINT "  R2  = 0x" FORMAT.HEX(8,&r2)
+PRINT "  R3  = 0x" FORMAT.HEX(8,&r3)
+; 检查 LR 是否为有效异常返回值
+IF (&lr==0xFFFFFFF1)||(&lr==0xFFFFFFF9)||(&lr==0xFFFFFFD)||(&lr==0xFFFFFFED)||(&lr==0xFFFFFFFD)
+(
+  PRINT ""
+  PRINT "  ✓ LR值正常 (有效的异常返回值)"
+)
+ELSE
+(
+  PRINT ""
+  PRINT "  ❌ LR值异常！不是有效的异常返回值"
+  PRINT "     正常值应该是: 0xFFFFFFF1/F9/FD/ED"
+  PRINT "     这通常表示栈被破坏！"
+)
+PRINT ""
+;====================================================================================
+; 3. 检查Fault状态寄存器
+;====================================================================================
+PRINT "【3】Fault状态寄存器:"
+PRINT "------------------------------------------------------------------------"
+LOCAL &hfsr &cfsr &mmfar &bfar
+&hfsr=Data.Long(EAHB:0xE000ED2C)
+&cfsr=Data.Long(EAHB:0xE000ED28)
+&mmfar=Data.Long(EAHB:0xE000ED34)
+&bfar=Data.Long(EAHB:0xE000ED38)
+PRINT "  HFSR  @ 0xE000ED2C = 0x" FORMAT.HEX(8,&hfsr)
+PRINT "  CFSR  @ 0xE000ED28 = 0x" FORMAT.HEX(8,&cfsr)
+PRINT "  MMFAR @ 0xE000ED34 = 0x" FORMAT.HEX(8,&mmfar)
+PRINT "  BFAR  @ 0xE000ED38 = 0x" FORMAT.HEX(8,&bfar)
+PRINT ""
+PRINT "  CFSR位字段解析:"
+; UFSR (bits 16-31)
+LOCAL &ufsr
+&ufsr=(&cfsr>>16)&0xFFFF
+IF (&ufsr&0x0001)!=0
+  PRINT "    [Bit 16] UNDEFINSTR  = 1 (未定义指令)"
+IF (&ufsr&0x0002)!=0
+  PRINT "    [Bit 17] INVSTATE    = 1 (❌ 非法状态 - Thumb/ARM混乱)"
+IF (&ufsr&0x0004)!=0
+  PRINT "    [Bit 18] INVPC       = 1 (非法PC加载)"
+IF (&ufsr&0x0008)!=0
+  PRINT "    [Bit 19] NOCP        = 1 (无协处理器)"
+IF (&ufsr&0x0100)!=0
+  PRINT "    [Bit 24] UNALIGNED   = 1 (未对齐访问)"
+IF (&ufsr&0x0200)!=0
+  PRINT "    [Bit 25] DIVBYZERO   = 1 (除零)"
+PRINT ""
+;====================================================================================
+; 4. 检查向量表配置
+;====================================================================================
+PRINT "【4】向量表检查:"
+PRINT "------------------------------------------------------------------------"
+LOCAL &vtor &reset_vec &hardfault_vec
+&vtor=Data.Long(EAHB:0xE000ED08)
+&reset_vec=Data.Long(EAHB:&vtor+4)
+&hardfault_vec=Data.Long(EAHB:&vtor+12)
+PRINT "  VTOR           = 0x" FORMAT.HEX(8,&vtor)
+PRINT "  Reset Vector   = 0x" FORMAT.HEX(8,&reset_vec)
+PRINT "  HardFault Vec  = 0x" FORMAT.HEX(8,&hardfault_vec)
+; 检查向量表地址是否对齐
+IF (&vtor&0x7F)!=0
+(
+  PRINT ""
+  PRINT "  ❌ 警告: VTOR未按128字节对齐！"
+)
+; 检查Reset向量的Thumb位
+IF (&reset_vec&0x1)==0
+(
+  PRINT ""
+  PRINT "  ❌ 警告: Reset_Handler的Thumb位未设置！"
+  PRINT "     这会导致INVSTATE错误"
+)
+PRINT ""
+;====================================================================================
+; 5. 检查main()和关键函数地址
+;====================================================================================
+PRINT "【5】关键函数地址检查:"
+PRINT "------------------------------------------------------------------------"
+LOCAL &main_addr &preos_addr &startos_addr
+&main_addr=ADDRESS.OFFSET(main)
+&preos_addr=ADDRESS.OFFSET(EcuM_PreOS_Init)
+&startos_addr=ADDRESS.OFFSET(EcuM_StartOS)
+PRINT "  main()           @ 0x" FORMAT.HEX(8,&main_addr) " (Thumb=" FORMAT.HEX(1,&main_addr&1) ")"
+PRINT "  EcuM_PreOS_Init  @ 0x" FORMAT.HEX(8,&preos_addr) " (Thumb=" FORMAT.HEX(1,&preos_addr&1) ")"
+PRINT "  EcuM_StartOS     @ 0x" FORMAT.HEX(8,&startos_addr) " (Thumb=" FORMAT.HEX(1,&startos_addr&1) ")"
+PRINT ""
+;====================================================================================
+; 6. 反汇编当前PC位置
+;====================================================================================
+PRINT "【6】当前PC位置反汇编:"
+PRINT "------------------------------------------------------------------------"
+Data.List &pc--20
+PRINT ""
+;====================================================================================
+; 7. 栈内容检查
+;====================================================================================
+PRINT "【7】栈顶内容分析 (最后压栈的数据):"
+PRINT "------------------------------------------------------------------------"
+LOCAL &i &addr &value
+REPEAT 8
+(
+  &addr=&msp+(&i*4)
+  &value=Data.Long(EAHB:&addr)
+  PRINT "  MSP+" FORMAT.HEX(2,&i*4) " [0x" FORMAT.HEX(8,&addr) "] = 0x" FORMAT.HEX(8,&value)
+  &i=&i+1
+)
+PRINT ""
+;====================================================================================
+; 总结和建议
+;====================================================================================
+PRINT "========================================================================"
+PRINT "诊断建议:"
+PRINT "========================================================================"
+IF (&lr!=0xFFFFFFF1)&&(&lr!=0xFFFFFFF9)&&(&lr!=0xFFFFFFFD)
+(
+  PRINT ""
+  PRINT "🔴 严重: LR寄存器损坏！"
+  PRINT "   可能原因:"
+  PRINT "   1. 主栈溢出,覆盖了栈帧"
+  PRINT "   2. FreeRTOS堆配置过大,侵占了栈空间"
+  PRINT "   建议:"
+  PRINT "   - 增加主栈大小(当前 " %DECIMAL (&stack_size/1024) "KB)"
+  PRINT "   - 减少FreeRTOS堆大小(检查FreeRTOSConfig.h)"
+  PRINT "   - 检查是否有函数递归调用"
+)
+IF (&ufsr&0x0002)!=0
+(
+  PRINT ""
+  PRINT "🔴 INVSTATE错误!"
+  PRINT "   可能原因:"
+  PRINT "   1. 跳转到非Thumb代码(LSB=0的地址)"
+  PRINT "   2. LR寄存器被破坏"
+  PRINT "   3. 向量表异常向量LSB=0"
+  PRINT "   建议:"
+  PRINT "   - 检查Vector_Table.s中的函数地址是否加1"
+  PRINT "   - 确认所有.c文件编译为Thumb模式"
+)
+IF &stack_free<1024
+(
+  PRINT ""
+  PRINT "🟡 警告: 主栈空间紧张(剩余 " %DECIMAL &stack_free " 字节)"
+  PRINT "   建议: 增加主栈大小"
+)
+PRINT ""
+PRINT "========================================================================"
+PRINT "诊断完成"
+PRINT "========================================================================"
+ENDDO

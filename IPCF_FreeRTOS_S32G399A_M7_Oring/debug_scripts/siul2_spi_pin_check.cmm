@@ -1,0 +1,52 @@
+; SIUL2_1 Pin Configuration Diagnostic for DSPI5 SPI
+; M7 core cannot access SIUL2_1 directly - must use TRACE32
+; 
+; Addresses:
+; - SIUL2_1 MSCR base: 0x44010240
+; - SIUL2_1 IMCR base: 0x44010A00 (for IMCR 512+)
+;
+; DSPI5 Pins:
+; - PK11 (CS):   MSCR[171] = 0x44010240 + (171-128)*4 = 0x440102EC
+; - PK13 (MOSI): MSCR[173] = 0x44010240 + (173-128)*4 = 0x440102F4
+; - PK14 (MISO): MSCR[174] = 0x44010240 + (174-128)*4 = 0x440102F8
+; - PK15 (SCK):  MSCR[175] = 0x44010240 + (175-128)*4 = 0x440102FC
+; - IMCR1007:    0x44010A00 + (1007-512)*4 = 0x440111BC
+;
+
+AREA.Create SPI_PIN
+AREA.Select SPI_PIN
+AREA.Clear SPI_PIN
+
+PRINT "==============================================="
+PRINT " SIUL2_1 Pin Configuration for DSPI5"
+PRINT "==============================================="
+
+PRINT ""
+PRINT "=== MSCR Values (Output Configuration) ==="
+PRINT "PK11 (CS)   MSCR[171] @ 0x440102EC = 0x" Data.LONG(D:0x440102EC)
+PRINT "PK13 (MOSI) MSCR[173] @ 0x440102F4 = 0x" Data.LONG(D:0x440102F4)
+PRINT "PK14 (MISO) MSCR[174] @ 0x440102F8 = 0x" Data.LONG(D:0x440102F8)
+PRINT "PK15 (SCK)  MSCR[175] @ 0x440102FC = 0x" Data.LONG(D:0x440102FC)
+
+PRINT ""
+PRINT "=== IMCR Value (Input Routing) ==="
+PRINT "IMCR1007 (SPI5_SIN) @ 0x440111BC = 0x" Data.LONG(D:0x440111BC)
+
+PRINT ""
+PRINT "=== MSCR Bit Fields ==="
+PRINT "Bit 21 (IBE): Input Buffer Enable - MUST be 1 for MISO input!"
+PRINT "Bit 20 (OBE): Output Buffer Enable"
+PRINT "Bits 19-16 (SSS): Source Signal Select (MUX)"
+
+PRINT ""
+PRINT "=== Expected Values for PK14 (MISO) ==="
+PRINT "IBE = 1 (0x00200000): Input buffer enabled"
+PRINT "SSS = 0 (GPIO with IMCR routing)"
+
+PRINT ""
+PRINT "=== Expected Value for IMCR1007 ==="
+PRINT "ALT3 = 3: Routes PK14 to SPI5_SIN"
+
+AREA.View SPI_PIN
+
+ENDDO

@@ -316,7 +316,7 @@ void AINFC_CAN_Period_10ms_Task(void *pvParameters)
 }
 
 
-void AINFC_CAN_Period_10ms_Main(void) 
+void AINFC_CAN_Main_task(void) 
 {
 
 	BaseType_t os_status;
@@ -333,10 +333,7 @@ void AINFC_CAN_Period_10ms_Main(void)
 	  }
 	}
 
-
 }
-
-
 
 
 #ifdef __cplusplus

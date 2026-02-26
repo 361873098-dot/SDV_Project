@@ -1,0 +1,244 @@
+; =============================================================================
+; TJA1145 + FlexCAN Full Diagnostic Script
+; S32G3 DSPI5 (0x402D0000) + FlexCAN0 (0x401B4000)
+; =============================================================================
+
+AREA.CLEAR
+AREA.CREATE CAN_DIAG 200. 120.
+AREA.SELECT CAN_DIAG
+AREA.VIEW CAN_DIAG
+
+PRINT "============================================================"
+PRINT "   TJA1145 + FlexCAN Full Diagnostic"
+PRINT "============================================================"
+
+; =============================================================================
+; 1. TJA1145 Status
+; =============================================================================
+PRINT ""
+PRINT "============ TJA1145 Status ============"
+
+LOCAL &tja_ms &tja_mc &tja_cc &tja_ts &tja_ge &tja_se &tja_te &tja_id
+&tja_ms=Var.VALUE(g_Spi_Baremetal_Debug.tja_R03_main_status)
+&tja_mc=Var.VALUE(g_Spi_Baremetal_Debug.tja_R01_mode_ctrl)
+&tja_cc=Var.VALUE(g_Spi_Baremetal_Debug.tja_R20_can_ctrl)
+&tja_ts=Var.VALUE(g_Spi_Baremetal_Debug.tja_R22_trans_status)
+&tja_ge=Var.VALUE(g_Spi_Baremetal_Debug.tja_R60_global_event)
+&tja_se=Var.VALUE(g_Spi_Baremetal_Debug.tja_R61_sys_event)
+&tja_te=Var.VALUE(g_Spi_Baremetal_Debug.tja_R63_trans_event)
+&tja_id=Var.VALUE(g_Spi_Baremetal_Debug.tja_R7E_device_id)
+
+PRINT "Reg 0x7E DeviceId    = 0x" FORMAT.HEX(2, &tja_id)
+PRINT "tja_init_step        = " Var.VALUE(g_Spi_Baremetal_Debug.tja_init_step)
+PRINT "tja_error_code       = " Var.VALUE(g_Spi_Baremetal_Debug.tja_error_code)
+PRINT ""
+
+; Main Status (0x03) decode
+PRINT "Reg 0x03 MainStatus  = 0x" FORMAT.HEX(2, &tja_ms)
+LOCAL &fsms &otws &nms
+&fsms=(&tja_ms>>7.)&0x1
+&otws=(&tja_ms>>6.)&0x1
+&nms=(&tja_ms>>5.)&0x1
+PRINT "  FSMS(b7)=" &fsms " | OTWS(b6)=" &otws " | NMS(b5)=" &nms
+IF &fsms==1
+  PRINT "  [WARN] FSMS=1: VCC/VIO undervoltage forced Sleep!"
+IF &nms==0
+  PRINT "  [OK] NMS=0: Normal Mode confirmed (entered Normal after power-up)"
+ELSE
+  PRINT "  [ERR] NMS=1: NOT yet in Normal Mode!"
+PRINT ""
+
+; Mode Control (0x01) decode
+LOCAL &mc_mode
+&mc_mode=&tja_mc&0x7
+PRINT "Reg 0x01 ModeCtrl    = 0x" FORMAT.HEX(2, &tja_mc) " (MC=" &mc_mode ")"
+PRINT ""
+
+; CAN Control (0x20) decode
+LOCAL &cmc
+&cmc=&tja_cc&0x3
+PRINT "Reg 0x20 CanCtrl     = 0x" FORMAT.HEX(2, &tja_cc) " (CMC=" &cmc ")"
+IF &cmc==0
+  PRINT "  [ERR] CMC=00: CAN Offline!"
+ELSE IF &cmc==1
+  PRINT "  [OK] CMC=01: CAN Active (no wake-up)"
+ELSE IF &cmc==2
+  PRINT "  [INFO] CMC=10: CAN Active + selective wake-up"
+ELSE IF &cmc==3
+  PRINT "  [WARN] CMC=11: Listen Only!"
+PRINT ""
+
+; Transceiver Status (0x22) decode
+PRINT "Reg 0x22 TransStatus = 0x" FORMAT.HEX(2, &tja_ts)
+LOCAL &cts &cpnerr &coscs &vcs
+&cts=(&tja_ts>>7.)&0x1
+&cpnerr=(&tja_ts>>6.)&0x1
+&coscs=(&tja_ts>>4.)&0x1
+&vcs=(&tja_ts>>1.)&0x1
+PRINT "  CTS(b7)=" &cts " | CPNERR(b6)=" &cpnerr " | COSCS(b4)=" &coscs " | VCS(b1)=" &vcs
+IF &cts==1
+  PRINT "  [OK] CTS=1: CAN Transceiver ACTIVE"
+ELSE
+  PRINT "  [ERR] CTS=0: CAN Transceiver NOT active!"
+IF &cpnerr==1
+  PRINT "  [WARN] CPNERR=1: CAN Partial Networking Error (Safe to ignore if PN not used)"
+IF &vcs==1
+  PRINT "  [ERR] VCS=1: VCC undervoltage detected NOW!"
+PRINT ""
+
+; Events
+PRINT "Reg 0x60 GlobalEvent = 0x" FORMAT.HEX(2, &tja_ge)
+PRINT "Reg 0x61 SysEvent    = 0x" FORMAT.HEX(2, &tja_se)
+PRINT "Reg 0x63 TransEvent  = 0x" FORMAT.HEX(2, &tja_te)
+
+; Decode System Event (0x61) - PO bit
+LOCAL &po
+&po=(&tja_se>>4.)&0x1
+IF &po==1
+  PRINT "  [INFO] PO=1: Power-On event detected (battery was reconnected)"
+
+; Decode Transceiver Event (0x63) - CF bit
+LOCAL &cf
+&cf=(&tja_te>>1.)&0x1
+IF &cf==1
+  PRINT "  [WARN] CF=1: CAN Failure event (may be from VCC undervoltage)"
+PRINT ""
+
+; =============================================================================
+; 1.5 Power Supply Analysis (Datasheet Section 7.11 + Table 34)
+; =============================================================================
+PRINT "======= Power Supply Analysis ======="
+PRINT ""
+PRINT "TJA1145A Voltage Requirements (from datasheet):"
+PRINT "  VBAT: min 4.5V  (power-on threshold: 4.2-4.55V rising)"
+PRINT "  VCC:  min 4.5V  (undervoltage detect: 4.5-4.75V)"
+PRINT "  VIO:  min 2.85V (undervoltage detect: 2.7-2.85V)"
+PRINT ""
+
+; Correlate multiple bits for root-cause diagnosis
+PRINT "[Diagnosis]"
+IF (&fsms==1)&&(&vcs==1)
+(
+  PRINT "  [CRITICAL] FSMS=1 + VCS=1: ACTIVE VCC Undervoltage!"
+  PRINT "  -> VCC is currently below 4.5-4.75V"
+  PRINT "  -> TJA1145 was FORCED into Sleep mode by hardware"
+  PRINT "  -> CAN communication is IMPOSSIBLE until VCC is fixed"
+  PRINT "  ACTION: Measure VCC pin with multimeter, must be >= 4.75V"
+)
+ELSE IF (&fsms==1)&&(&vcs==0)
+(
+  PRINT "  [WARN] FSMS=1 + VCS=0: Past undervoltage event"
+  PRINT "  -> VCC has recovered but TJA1145 is still in forced Sleep"
+  PRINT "  -> Software must perform recovery: Standby -> Normal"
+  PRINT "  -> Check if VBAT dropped below 4.5V during power-up"
+)
+ELSE IF (&vcs==1)&&(&fsms==0)
+(
+  PRINT "  [WARN] VCS=1 + FSMS=0: VCC undervoltage detected"
+  PRINT "  -> VCC is marginal (below 4.5-4.75V threshold)"
+  PRINT "  -> Sleep forced will happen in 180-440ms if not corrected"
+)
+ELSE IF (&po==1)
+(
+  PRINT "  [INFO] PO=1: Recent power-on, VBAT was below 2.8-3.0V"
+  PRINT "  -> TJA1145 was in Off mode, just powered up"
+  PRINT "  -> Ensure stable VBAT >= 4.5V before init"
+)
+ELSE IF (&nms==0)&&(&cts==1)&&(&vcs==0)
+(
+  PRINT "  [OK] Power supply appears healthy"
+  PRINT "  -> No undervoltage conditions detected"
+)
+ELSE
+(
+  PRINT "  [INFO] No undervoltage flags, but check NMS/CTS above"
+)
+PRINT ""
+
+; Power supply diagnostic counters from C code
+PRINT "[Power Supply Counters (from PeriodicTest)]"
+LOCAL &pwr_fsms &pwr_vcs &pwr_po &pwr_cf &pwr_status
+&pwr_fsms=Var.VALUE(g_Spi_Baremetal_Debug.tja_pwr_fsms_count)
+&pwr_vcs=Var.VALUE(g_Spi_Baremetal_Debug.tja_pwr_vcs_count)
+&pwr_po=Var.VALUE(g_Spi_Baremetal_Debug.tja_pwr_po_detected)
+&pwr_cf=Var.VALUE(g_Spi_Baremetal_Debug.tja_pwr_cf_detected)
+&pwr_status=Var.VALUE(g_Spi_Baremetal_Debug.tja_pwr_supply_status)
+PRINT "  FSMS_count=" &pwr_fsms " VCS_count=" &pwr_vcs
+PRINT "  PO_detected=" &pwr_po " CF_detected=" &pwr_cf
+PRINT "  supply_status=" &pwr_status " (0=OK,1=VCC_UV,2=FORCED_SLEEP,3=POWER_ON)"
+IF &pwr_fsms>0
+  PRINT "  [WARN] Undervoltage forced Sleep occurred " &pwr_fsms " time(s)"
+IF &pwr_vcs>0
+  PRINT "  [WARN] Active VCC undervoltage detected " &pwr_vcs " time(s)"
+PRINT ""
+
+; =============================================================================
+; 2. FlexCAN0 Registers
+; =============================================================================
+PRINT "============ FlexCAN0 Status ============"
+
+LOCAL &CAN0_BASE
+&CAN0_BASE=0x401B4000
+
+LOCAL &can_mcr &can_ctrl1 &can_esr1 &can_ecr
+&can_mcr=Data.Long(D:&CAN0_BASE+0x00)
+&can_ctrl1=Data.Long(D:&CAN0_BASE+0x04)
+&can_esr1=Data.Long(D:&CAN0_BASE+0x20)
+&can_ecr=Data.Long(D:&CAN0_BASE+0x1C)
+
+LOCAL &mdis_can &halt_can &notrdy &frzack &lpmack
+&mdis_can=(&can_mcr>>31.)&0x1
+&halt_can=(&can_mcr>>28.)&0x1
+&notrdy=(&can_mcr>>27.)&0x1
+&frzack=(&can_mcr>>24.)&0x1
+&lpmack=(&can_mcr>>20.)&0x1
+PRINT "MCR  = 0x" FORMAT.HEX(8, &can_mcr)
+PRINT "  MDIS=" &mdis_can " HALT=" &halt_can " NOTRDY=" &notrdy " FRZACK=" &frzack " LPMACK=" &lpmack
+IF &mdis_can==1
+  PRINT "  [ERR] FlexCAN DISABLED!"
+IF &frzack==1
+  PRINT "  [WARN] FlexCAN in FREEZE mode!"
+
+LOCAL &fltconf &txerrcnt &rxerrcnt
+&fltconf=(&can_esr1>>4.)&0x3
+&txerrcnt=&can_ecr&0xFF
+&rxerrcnt=(&can_ecr>>8.)&0xFF
+PRINT "ESR1 = 0x" FORMAT.HEX(8, &can_esr1) " (FLT_CONF=" &fltconf ")"
+IF &fltconf==0
+  PRINT "  [OK] Error Active"
+ELSE IF &fltconf==1
+  PRINT "  [WARN] Error Passive!"
+ELSE
+  PRINT "  [ERR] BUS OFF!!"
+PRINT "ECR  = 0x" FORMAT.HEX(8, &can_ecr) " (TX_ERR=" &txerrcnt " RX_ERR=" &rxerrcnt ")"
+PRINT ""
+
+; =============================================================================
+; 3. Application Counters
+; =============================================================================
+PRINT "============ Application ============"
+PRINT "g_canTxCount         = " Var.VALUE(g_canTxCount)
+PRINT "g_canRxCount         = " Var.VALUE(g_canRxCount)
+PRINT "EcuM_Period_10ms_cnt = " Var.VALUE(EcuM_Period_10ms_cnt)
+PRINT "SPI init_ok=" Var.VALUE(g_Spi_Baremetal_Debug.init_ok) " error=" Var.VALUE(g_Spi_Baremetal_Debug.error_code)
+PRINT ""
+
+; =============================================================================
+; Summary
+; =============================================================================
+PRINT "============ SUMMARY ============"
+IF &vcs==1
+  PRINT "[CRITICAL] VCC undervoltage NOW -> Check VBAT>=4.5V, VCC>=4.75V"
+IF &fsms==1
+  PRINT "[CRITICAL] Undervoltage forced Sleep -> Recovery needed"
+IF &nms==1
+  PRINT "[CRITICAL] NMS=1: TJA1145 NOT yet in Normal Mode -> check recovery"
+IF &cts==0
+  PRINT "[CRITICAL] CTS=0: CAN transceiver NOT active"
+IF (&nms==0)&&(&cts==1)&&(&vcs==0)
+  PRINT "[OK] TJA1145 Normal + CAN Active + Power Supply OK"
+PRINT ""
+PRINT "Done."
+
+ENDDO
+

@@ -1,0 +1,75 @@
+;==================================================================================================
+; TRACE32快速诊断: 检查关键地址和寄存器
+;==================================================================================================
+AREA.Create CHECK
+AREA.Select CHECK
+AREA.Clear
+
+PRINT "========================================================================"
+PRINT "快速诊断 - 关键信息"
+PRINT "========================================================================"
+PRINT ""
+
+; 1. 当前位置
+PRINT "[1] 当前CPU状态:"
+PRINT "  PC  = " FORMAT.HEX(8,REGISTER(PC)) " - " %String.Cut(sYmbol.Name(D:REGISTER(PC)),50)
+PRINT "  LR  = " FORMAT.HEX(8,REGISTER(LR))
+PRINT "  SP  = " FORMAT.HEX(8,REGISTER(SP))
+PRINT "  MSP = " FORMAT.HEX(8,REGISTER(MSP))
+PRINT ""
+
+; 2. 栈配置
+PRINT "[2] 栈范围:"
+LOCAL &stack_start &stack_end
+&stack_start=ADDRESS.OFFSET(__Stack_dtcm_start)
+&stack_end=ADDRESS.OFFSET(__Stack_dtcm_end)
+PRINT "  Stack Start = " FORMAT.HEX(8,&stack_start)
+PRINT "  Stack End   = " FORMAT.HEX(8,&stack_end)
+PRINT "  Stack Size  = " %DECIMAL (&stack_start-&stack_end) " bytes (" %DECIMAL ((&stack_start-&stack_end)/1024) " KB)"
+
+LOCAL &msp
+&msp=REGISTER(MSP)
+IF &msp==&stack_start
+  PRINT "  ⚠️  MSP == Stack Start (栈未使用或未初始化!)"
+ELSE
+  PRINT "  ✓ MSP正常 (已使用 " %DECIMAL (&stack_start-&msp) " bytes)"
+PRINT ""
+
+; 3. Fault寄存器
+PRINT "[3] Fault状态寄存器:"
+LOCAL &cfsr &hfsr
+&cfsr=Data.Long(EAHB:0xE000ED28)
+&hfsr=Data.Long(EAHB:0xE000ED2C)
+PRINT "  CFSR @ 0xE000ED28 = " FORMAT.HEX(8,&cfsr)
+PRINT "  HFSR @ 0xE000ED2C = " FORMAT.HEX(8,&hfsr)
+IF &cfsr==0
+  PRINT "  ✓ 无Fault记录"
+ELSE
+  PRINT "  ❌ 存在Fault!"
+PRINT ""
+
+; 4. CFSR详细dump
+PRINT "[4] CFSR寄存器详细信息:"
+Data.dump EAHB:0xE000ED28
+PRINT ""
+
+; 5. 栈顶内容
+PRINT "[5] 栈顶内容 (MSP附近):"
+Data.dump EAHB:&msp-64
+PRINT ""
+
+; 6. PC位置反汇编
+PRINT "[6] PC位置代码:"
+Data.List REGISTER(PC)-16..REGISTER(PC)+32
+PRINT ""
+
+; 7. 调用栈
+PRINT "[7] 调用栈:"
+Frame.view /Locals
+PRINT ""
+
+PRINT "========================================================================"
+PRINT "诊断完成"
+PRINT "========================================================================"
+
+ENDDO
