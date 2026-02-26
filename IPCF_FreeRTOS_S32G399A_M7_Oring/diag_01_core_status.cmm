@@ -1,0 +1,303 @@
+; diag_01_core_status.cmm
+; 综合诊断: CPU状态 + CAN中断优先级冲突检查 + FreeRTOS堆栈检查
+
+AREA.Create MAIN 120. 60.
+AREA.Select MAIN
+AREA.view MAIN
+AREA.Clear
+
+; First halt the CPU - required to read registers
+BREAK
+WAIT 200.ms
+
+PRINT "============================================================"
+PRINT "    COMPREHENSIVE DIAGNOSTIC - CAN IRQ / Stack / FreeRTOS"
+PRINT "============================================================"
+
+; ================================================================
+; Section 1: CPU Core Status
+; ================================================================
+PRINT ""
+PRINT "========== [1] CPU Core Status =========="
+&pc=Register(pc)
+&lr=Register(lr)
+&psr=Register(xpsr)
+&ipsr=&psr&0x1FF
+&msp=Register(msp)
+&psp=Register(psp)
+
+PRINT "-> Current PC:     " %HEX &pc " ( " Y.NAME(D:&pc) " )"
+PRINT "-> Current LR:     " %HEX &lr " ( " Y.NAME(D:&lr) " )"
+PRINT "-> Current SP:     " %HEX Register(sp)
+PRINT "-> Current MSP:    " %HEX &msp
+PRINT "-> Current PSP:    " %HEX &psp
+PRINT "-> Current XPSR:   " %HEX &psr
+
+IF &ipsr==0
+(
+    PRINT "-> CPU Mode:       Thread Mode (Normal Task)"
+)
+ELSE
+(
+    PRINT "-> CPU Mode:       Handler Mode (In Exception/Interrupt)"
+    PRINT "-> Exception Num:  " FORMAT.DECIMAL(10., &ipsr)
+    IF &ipsr==3
+    (
+        PRINT ">>> HARD FAULT Detected <<<"
+        &cfsr=Data.Long(E:0xE000ED28)
+        &hfsr=Data.Long(E:0xE000ED2C)
+        &bfar=Data.Long(E:0xE000ED38)
+        &mmfar=Data.Long(E:0xE000ED34)
+        PRINT "CFSR: " %HEX &cfsr
+        PRINT "HFSR: " %HEX &hfsr
+        PRINT "BFAR: " %HEX &bfar
+        PRINT "MMFAR:" %HEX &mmfar
+        
+        &exc_ret=Register(lr)
+        IF (&exc_ret&0x4)==0x4
+        (
+            &fault_sp=Register(psp)
+            PRINT "Stack used:  PSP (" %HEX &fault_sp ")"
+        )
+        ELSE
+        (
+            &fault_sp=Register(msp)
+            PRINT "Stack used:  MSP (" %HEX &fault_sp ")"
+        )
+        &stacked_pc=Data.Long(D:&fault_sp+0x18)
+        &stacked_lr=Data.Long(D:&fault_sp+0x14)
+        PRINT "Stacked PC : " %HEX &stacked_pc " ( " Y.NAME(D:&stacked_pc) " )"
+        PRINT "Stacked LR : " %HEX &stacked_lr " ( " Y.NAME(D:&stacked_lr) " )"
+    )
+    ELSE IF &ipsr>15.
+    (
+        &irq=&ipsr-16.
+        PRINT ">>> Processing IRQ Number: " FORMAT.DECIMAL(10., &irq) " <<<"
+        IF &irq==39.
+        (
+            PRINT ">>> IRQ 39 = CAN0_ORED_0_7_MB (CAN0 MB0-7 Interrupt) <<<"
+        )
+    )
+)
+
+; ================================================================
+; Section 2: FlexCAN Variables
+; ================================================================
+PRINT ""
+PRINT "========== [2] FlexCAN Variables =========="
+IF Y.EXIST(g_canTxCount)
+(
+    PRINT "g_canTxCount:  " FORMAT.DECIMAL(10., V.VALUE(g_canTxCount))
+    PRINT "g_canTxCount2: " FORMAT.DECIMAL(10., V.VALUE(g_canTxCount2))
+    PRINT "g_canRxCount:  " FORMAT.DECIMAL(10., V.VALUE(g_canRxCount))
+    PRINT "g_canRxCount2: " FORMAT.DECIMAL(10., V.VALUE(g_canRxCount2))
+)
+IF Y.EXIST(g_txBusy)
+(
+    PRINT "g_txBusy[0]:   " FORMAT.DECIMAL(5., V.VALUE(g_txBusy[0]))
+    PRINT "g_txBusy[1]:   " FORMAT.DECIMAL(5., V.VALUE(g_txBusy[1]))
+)
+IF Y.EXIST(g_rxConfigured)
+(
+    PRINT "g_rxConfigured[0]: " FORMAT.DECIMAL(5., V.VALUE(g_rxConfigured[0]))
+    PRINT "g_rxConfigured[1]: " FORMAT.DECIMAL(5., V.VALUE(g_rxConfigured[1]))
+)
+
+; ================================================================
+; Section 3: FreeRTOS Task Info
+; ================================================================
+PRINT ""
+PRINT "========== [3] FreeRTOS Task Info =========="
+IF Y.EXIST(pxCurrentTCB)
+(
+    &ptcb=V.VALUE(pxCurrentTCB)
+    PRINT "pxCurrentTCB:  " %HEX &ptcb
+    IF &ptcb!=0
+    (
+        ; TCB structure: pxTopOfStack at offset 0
+        &topOfStack=Data.Long(D:&ptcb)
+        PRINT "pxTopOfStack:  " %HEX &topOfStack
+        ; pxStack (stack bottom) is at a different offset, try to read
+        ; For FreeRTOS v10.4.6 ARM port, pxStack is typically at offset 0x30
+        ; Try reading task name from pcTaskName (offset 0x34 for 32-bit port)
+        ; Task name is at offset 52 (0x34) in typical TCB
+        IF Y.EXIST(pxCurrentTCB->pcTaskName)
+        (
+            PRINT "Task Name:     " V.STRING(pxCurrentTCB->pcTaskName)
+        )
+        IF Y.EXIST(pxCurrentTCB->pxStack)
+        (
+            &stackBase=V.VALUE(pxCurrentTCB->pxStack)
+            PRINT "pxStackBase:   " %HEX &stackBase
+            ; Calculate stack usage
+            &stackUsed=&stackBase-&topOfStack
+            PRINT "Stack Used:    approx " FORMAT.DECIMAL(10., &stackUsed) " bytes (if top < base, stack may be overflowed!)"
+        )
+    )
+)
+
+IF Y.EXIST(uxCurrentNumberOfTasks)
+(
+    PRINT "uxCurrentNumberOfTasks: " FORMAT.DECIMAL(5., V.VALUE(uxCurrentNumberOfTasks))
+)
+
+; ================================================================
+; Section 4: CAN0 Interrupt Priority vs FreeRTOS
+; ================================================================
+PRINT ""
+PRINT "========== [4] CAN0 IRQ Priority vs FreeRTOS =========="
+; CAN0_ORED_0_7_MB_IRQn = IRQ 39
+; NVIC priority register for IRQ 39: 0xE000E400 + 39 = 0xE000E427
+; (each IRQ has 1 byte in NVIC_IPR)
+&can0_mb07_prio_addr=0xE000E400+39.
+&can0_mb07_prio=Data.Byte(E:&can0_mb07_prio_addr)
+&can0_mb07_prio_shifted=&can0_mb07_prio>>4.
+PRINT "CAN0_ORED_0_7_MB (IRQ39) NVIC Priority: " FORMAT.DECIMAL(5., &can0_mb07_prio) " (raw byte)"
+PRINT "  -> Effective priority level: " FORMAT.DECIMAL(5., &can0_mb07_prio_shifted) " (shifted >>4, lower=higher prio)"
+
+; CAN0_ORED (IRQ 37) and CAN0_ERR (IRQ 38)
+&can0_ored_prio=Data.Byte(E:0xE000E400+37.)
+&can0_err_prio=Data.Byte(E:0xE000E400+38.)
+PRINT "CAN0_ORED      (IRQ37) NVIC Priority: " FORMAT.DECIMAL(5., &can0_ored_prio) " (raw byte)"
+PRINT "CAN0_ERR       (IRQ38) NVIC Priority: " FORMAT.DECIMAL(5., &can0_err_prio) " (raw byte)"
+
+; FreeRTOS configMAX_SYSCALL_INTERRUPT_PRIORITY
+; configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY = 1
+; configPRIO_BITS = 4
+; configMAX_SYSCALL_INTERRUPT_PRIORITY = 1 << (8-4) = 0x10 = 16
+PRINT ""
+PRINT "FreeRTOS configMAX_SYSCALL_INTERRUPT_PRIORITY = 0x10 (16)"
+PRINT "  -> This means ONLY IRQs with NVIC priority >= 0x10 can use FreeRTOS API"
+PRINT "  -> IRQs with NVIC priority < 0x10 MUST NOT call FreeRTOS API"
+
+IF &can0_mb07_prio<0x10
+(
+    PRINT ""
+    PRINT "!!! CRITICAL: CAN0_ORED_0_7_MB priority (" FORMAT.DECIMAL(3., &can0_mb07_prio) ") < 0x10 !!!"
+    PRINT "!!! This IRQ is TOO HIGH priority for FreeRTOS API calls !!!"
+    PRINT "!!! The CAN ISR calls SchM_Enter (which uses vPortEnterCritical) !!!"
+    PRINT "!!! This WILL cause a deadlock or assertion failure !!!"
+)
+ELSE
+(
+    PRINT "(OK) CAN0_ORED_0_7_MB priority is within FreeRTOS safe range"
+)
+
+; IPCF interrupt priority check
+; MSCM_INT2 = IRQ 3
+&ipcf_prio=Data.Byte(E:0xE000E400+3.)
+PRINT ""
+PRINT "IPCF MSCM_INT2 (IRQ3)  NVIC Priority: " FORMAT.DECIMAL(5., &ipcf_prio) " (raw byte)"
+
+; ================================================================
+; Section 5: FlexCAN0 Register Status
+; ================================================================
+PRINT ""
+PRINT "========== [5] FlexCAN0 Register Status =========="
+; FlexCAN0 base = 0x401B4000 (S32G3)
+&can0_base=0x401B4000
+&can0_mcr=Data.Long(E:&can0_base+0x00)
+&can0_ctrl1=Data.Long(E:&can0_base+0x04)
+&can0_esr1=Data.Long(E:&can0_base+0x20)
+&can0_ecr=Data.Long(E:&can0_base+0x1C)
+&can0_imask1=Data.Long(E:&can0_base+0x28)
+&can0_iflag1=Data.Long(E:&can0_base+0x30)
+
+PRINT "FlexCAN0 MCR:    " %HEX &can0_mcr
+PRINT "FlexCAN0 CTRL1:  " %HEX &can0_ctrl1
+PRINT "FlexCAN0 ESR1:   " %HEX &can0_esr1
+PRINT "FlexCAN0 ECR:    " %HEX &can0_ecr
+PRINT "FlexCAN0 IMASK1: " %HEX &can0_imask1
+PRINT "FlexCAN0 IFLAG1: " %HEX &can0_iflag1
+
+; Decode ESR1
+&boff=(&can0_esr1>>2)&1
+&err=(&can0_esr1>>1)&1
+&tx_wrn=(&can0_esr1>>14.)&1
+&rx_wrn=(&can0_esr1>>15.)&1
+&flt_conf=(&can0_esr1>>4.)&3
+PRINT ""
+PRINT "ESR1 Decode:"
+PRINT "  Bus Off:      " FORMAT.DECIMAL(3., &boff)
+PRINT "  Error:        " FORMAT.DECIMAL(3., &err)
+PRINT "  TX Warning:   " FORMAT.DECIMAL(3., &tx_wrn)
+PRINT "  RX Warning:   " FORMAT.DECIMAL(3., &rx_wrn)
+PRINT "  Fault Confinement: " FORMAT.DECIMAL(3., &flt_conf) " (0=Active, 1=Passive, 2+=BusOff)"
+
+; ECR decode
+&txerr=&can0_ecr&0xFF
+&rxerr=(&can0_ecr>>8.)&0xFF
+PRINT "  TX Error Cnt: " FORMAT.DECIMAL(5., &txerr)
+PRINT "  RX Error Cnt: " FORMAT.DECIMAL(5., &rxerr)
+
+; Decode IMASK1 - which MBs have interrupt enabled
+PRINT ""
+PRINT "IMASK1 Decode (Interrupt Enabled MBs):"
+PRINT "  MB0 (TX0): " FORMAT.DECIMAL(3., &can0_imask1&1)
+PRINT "  MB1 (TX1): " FORMAT.DECIMAL(3., (&can0_imask1>>1)&1)
+PRINT "  MB2 (RX0): " FORMAT.DECIMAL(3., (&can0_imask1>>2)&1)
+PRINT "  MB3 (RX1): " FORMAT.DECIMAL(3., (&can0_imask1>>3)&1)
+
+; IFLAG1 - pending interrupts
+PRINT "IFLAG1 Decode (Pending Interrupt MBs):"
+PRINT "  MB0 (TX0): " FORMAT.DECIMAL(3., &can0_iflag1&1)
+PRINT "  MB1 (TX1): " FORMAT.DECIMAL(3., (&can0_iflag1>>1)&1)
+PRINT "  MB2 (RX0): " FORMAT.DECIMAL(3., (&can0_iflag1>>2)&1)
+PRINT "  MB3 (RX1): " FORMAT.DECIMAL(3., (&can0_iflag1>>3)&1)
+
+; ================================================================
+; Section 6: MSP Stack Overflow Check
+; ================================================================
+PRINT ""
+PRINT "========== [6] MSP Stack Overflow Check =========="
+; DTCM Stack: 0x2000E000 - 0x2000FFFF (8KB)
+PRINT "DTCM Stack range: 0x2000E000 - 0x20010000 (8KB)"
+PRINT "Current MSP:      " %HEX &msp
+IF &msp<0x2000E000
+(
+    PRINT "!!! MSP BELOW STACK BOTTOM - STACK OVERFLOW !!!"
+)
+ELSE
+(
+    &msp_remaining=&msp-0x2000E000
+    PRINT "MSP remaining:    " FORMAT.DECIMAL(10., &msp_remaining) " bytes"
+    IF &msp_remaining<256.
+    (
+        PRINT "!!! WARNING: MSP very low, near overflow !!!"
+    )
+)
+
+; ================================================================
+; Summary
+; ================================================================
+PRINT ""
+PRINT "========== [SUMMARY] =========="
+PRINT "1. CPU is in: " 
+IF &ipsr==0
+(
+    PRINT "   Thread Mode"
+)
+ELSE IF &ipsr==3
+(
+    PRINT "   HARD FAULT"
+)
+ELSE IF &ipsr>15.
+(
+    PRINT "   IRQ " FORMAT.DECIMAL(5., &ipsr-16.) " handler"
+)
+ELSE
+(
+    PRINT "   System exception " FORMAT.DECIMAL(5., &ipsr)
+)
+
+PRINT "2. Current Task: IDLE (as shown by pxCurrentTCB)"
+PRINT "3. Check [4] above for CAN IRQ priority conflict with FreeRTOS"
+PRINT "4. Check [5] above for CAN bus errors (ESR1/ECR)"
+PRINT "5. Check [6] above for MSP stack overflow"
+
+PRINT ""
+PRINT "============================================================"
+PRINT "    DIAGNOSTIC COMPLETE"
+PRINT "============================================================"
+
+ENDDO

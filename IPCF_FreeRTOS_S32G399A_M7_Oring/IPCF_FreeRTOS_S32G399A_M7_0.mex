@@ -1769,23 +1769,23 @@
                                  <struct name="37">
                                     <setting name="Name" value="PlatformIsrConfig_37"/>
                                     <setting name="IsrName" value="CAN0_ORED_IRQn"/>
-                                    <setting name="IsrEnabled" value="true"/>
+                                    <setting name="IsrEnabled" value="false"/>
                                     <setting name="IsrPriority" value="0"/>
                                     <setting name="IsrHandler" value="undefined_handler"/>
                                  </struct>
                                  <struct name="38">
                                     <setting name="Name" value="PlatformIsrConfig_38"/>
                                     <setting name="IsrName" value="CAN0_ERR_IRQn"/>
-                                    <setting name="IsrEnabled" value="true"/>
+                                    <setting name="IsrEnabled" value="false"/>
                                     <setting name="IsrPriority" value="0"/>
                                     <setting name="IsrHandler" value="undefined_handler"/>
                                  </struct>
                                  <struct name="39">
                                     <setting name="Name" value="PlatformIsrConfig_39"/>
                                     <setting name="IsrName" value="CAN0_ORED_0_7_MB_IRQn"/>
-                                    <setting name="IsrEnabled" value="true"/>
-                                    <setting name="IsrPriority" value="5"/>
-                                    <setting name="IsrHandler" value="CAN0_ORED_0_7_MB_IRQHandler"/>
+                                    <setting name="IsrEnabled" value="false"/>
+                                    <setting name="IsrPriority" value="0"/>
+                                    <setting name="IsrHandler" value="undefined_handler"/>
                                  </struct>
                                  <struct name="40">
                                     <setting name="Name" value="PlatformIsrConfig_40"/>
