@@ -1,0 +1,21 @@
+; =============================================================================
+; diag_struct_check.cmm
+; =============================================================================
+
+AREA.RESet
+AREA
+
+PRINT ""
+PRINT "=== STRUCT LAYOUT CHECK ==="
+PRINT ""
+PRINT "sizeof(EcuM_DiagInfo_t) = " Var.SIZEOF(EcuM_DiagInfo_t)
+PRINT "sizeof(EcuM_TaskDiag_t) = " Var.SIZEOF(EcuM_TaskDiag_t)
+PRINT ""
+PRINT "updateCount   = " Var.VALUE(g_ecuMDiag.updateCount)
+PRINT "diagSkipCount = " Var.VALUE(g_ecuMDiag.diagSkipCount)
+PRINT "uptimeSeconds = " Var.VALUE(g_ecuMDiag.uptimeSeconds)
+PRINT "totalRuntime  = " Var.VALUE(g_ecuMDiag.totalRuntime)
+PRINT ""
+PRINT "=== DONE ==="
+
+ENDDO

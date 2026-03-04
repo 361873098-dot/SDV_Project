@@ -1,0 +1,112 @@
+; =============================================================================
+; diag_evidence.cmm - Collect diagnostic subsystem internal state
+; NOTE: MC_RGM/PMC registers are NOT accessible from M7 core (bus error)
+;       Only reading SRAM variables and Cortex-M7 internal registers
+; =============================================================================
+
+AREA.RESet
+WinPOS 0. 0. 120. 40.
+AREA.view
+AREA.Select A000
+AREA.Clear
+
+PRINT "============================================================"
+PRINT " Diagnostic Evidence Collection"
+PRINT "============================================================"
+
+; --- 1. Key g_ecuMDiag fields ---
+PRINT ""
+PRINT "=== 1. g_ecuMDiag Summary ==="
+PRINT "  updateCount    = " Var.VALUE(g_ecuMDiag.updateCount)
+PRINT "  diagSkipCount  = " Var.VALUE(g_ecuMDiag.diagSkipCount)
+PRINT "  overallCpuLoad = " Var.VALUE(g_ecuMDiag.overallCpuLoad)
+PRINT "  uptimeSeconds  = " Var.VALUE(g_ecuMDiag.uptimeSeconds)
+PRINT "  totalRuntime   = " Var.VALUE(g_ecuMDiag.totalRuntime)
+PRINT "  taskCount      = " Var.VALUE(g_ecuMDiag.taskCount)
+PRINT "  freeHeapSize   = " Var.VALUE(g_ecuMDiag.freeHeapSize)
+
+; --- 2. Struct field addresses (verify layout/padding) ---
+PRINT ""
+PRINT "=== 2. Struct Field Addresses ==="
+PRINT "  &g_ecuMDiag          = " Var.ADDRESS(g_ecuMDiag)
+PRINT "  sizeof(g_ecuMDiag)   = " Var.SIZEOF(g_ecuMDiag)
+PRINT "  &totalRuntime        = " Var.ADDRESS(g_ecuMDiag.totalRuntime)
+PRINT "  &overallCpuLoad      = " Var.ADDRESS(g_ecuMDiag.overallCpuLoad)
+PRINT "  &uptimeSeconds       = " Var.ADDRESS(g_ecuMDiag.uptimeSeconds)
+PRINT "  &updateCount         = " Var.ADDRESS(g_ecuMDiag.updateCount)
+PRINT "  &diagSkipCount       = " Var.ADDRESS(g_ecuMDiag.diagSkipCount)
+
+; --- 3. Internal static variables ---
+PRINT ""
+PRINT "=== 3. Internal Static Variables ==="
+PRINT "  s_prevTotalRuntime   = " Var.VALUE(s_prevTotalRuntime)
+PRINT "  s_accumTotalCycles   = " Var.VALUE(s_accumTotalCycles)
+PRINT "  s_lastUpdateTick     = " Var.VALUE(s_lastUpdateTick)
+
+; --- 4. 10ms task call counter ---
+PRINT ""
+PRINT "=== 4. Task Loop Counter ==="
+PRINT "  EcuM_Period_10ms_cnt = " Var.VALUE(EcuM_Period_10ms_cnt)
+
+; --- 5. DWT Registers (Cortex-M7 internal, always accessible) ---
+PRINT ""
+PRINT "=== 5. DWT Registers ==="
+PRINT "  DWT_CYCCNT  = 0x" Data.Long(SD:0xE0001004)
+PRINT "  DWT_CTRL    = 0x" Data.Long(SD:0xE0001000)
+PRINT "  DEMCR       = 0x" Data.Long(SD:0xE000EDFC)
+
+; --- 6. Per-task CPU Load ---
+PRINT ""
+PRINT "=== 6. Per-Task CPU Load ==="
+&i=0
+WHILE &i<Var.VALUE(g_ecuMDiag.taskCount)
+(
+  PRINT "  Task[" &i "]: cpuLoad=" Var.VALUE(g_ecuMDiag.tasks[&i].cpuLoadPercent) "  name=" Var.STRing(g_ecuMDiag.tasks[&i].name)
+  &i=&i+1
+)
+
+; --- 7. Task Tracker (first 8 slots) ---
+PRINT ""
+PRINT "=== 7. Task Tracker (first 8 slots) ==="
+&i=0
+WHILE &i<8.
+(
+  PRINT "  [" &i "] handle=" Var.VALUE(s_taskTracker[&i].handle) "  prevRT=" Var.VALUE(s_taskTracker[&i].prevRuntime) "  accumCycles=" Var.VALUE(s_taskTracker[&i].accumCycles)
+  &i=&i+1
+)
+
+; --- 8. Cortex-M7 Fault Registers (always accessible) ---
+PRINT ""
+PRINT "=== 8. Cortex-M7 Fault Registers ==="
+&cfsr=Data.Long(SD:0xE000ED28)
+&hfsr=Data.Long(SD:0xE000ED2C)
+PRINT "  CFSR  = 0x" &cfsr
+PRINT "  HFSR  = 0x" &hfsr
+PRINT "  DFSR  = 0x" Data.Long(SD:0xE000ED30)
+PRINT "  AIRCR = 0x" Data.Long(SD:0xE000ED0C)
+PRINT "  ICSR  = 0x" Data.Long(SD:0xE000ED04)
+
+IF &cfsr!=0
+  PRINT "  !!! CFSR non-zero: MemFault/BusFault/UsageFault !!!"
+IF &hfsr!=0
+  PRINT "  !!! HFSR non-zero: HardFault !!!"
+
+; --- 9. Sanity Check: expected vs actual ---
+PRINT ""
+PRINT "=== 9. Sanity Check ==="
+&cnt=Var.VALUE(EcuM_Period_10ms_cnt)
+&uptime=Var.VALUE(g_ecuMDiag.uptimeSeconds)
+&updates=Var.VALUE(g_ecuMDiag.updateCount)
+&skips=Var.VALUE(g_ecuMDiag.diagSkipCount)
+PRINT "  10ms loop iterations   = " &cnt
+PRINT "  Expected diag calls    = " &cnt/100.
+PRINT "  Actual updates+skips   = " &updates+&skips
+PRINT "  uptimeSeconds          = " &uptime
+PRINT "  If iterations/100 != updates+skips, something is WRONG"
+
+PRINT ""
+PRINT "============================================================"
+PRINT " DONE - Copy ALL output above"
+PRINT "============================================================"
+
+ENDDO

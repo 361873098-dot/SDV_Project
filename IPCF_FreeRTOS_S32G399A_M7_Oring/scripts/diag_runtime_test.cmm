@@ -1,0 +1,113 @@
+; =============================================================================
+; diag_runtime_test.cmm — Zero variables via debugger, resume, check results
+; Purpose: Determine if memset in EcuM_Diag_Init was optimized away
+;
+; Test logic:
+;   1. Halt CPU
+;   2. Force-zero s_taskTracker, updateCount, diagSkipCount, accumTotalCycles
+;   3. Resume CPU for 5 seconds
+;   4. Halt again and read values
+;   If updateCount ≈ 5 → memset was the problem (variables never zeroed)
+;   If updateCount is garbage → something actively corrupts memory
+; =============================================================================
+
+AREA.RESet
+WinPOS 0. 0. 120. 40.
+AREA.view
+AREA.Select A000
+AREA.Clear
+
+PRINT "============================================================"
+PRINT " Runtime Test: Force-zero then observe"
+PRINT "============================================================"
+
+; Step 1: Halt CPU
+Break
+PRINT "  CPU halted."
+
+; Step 2: Read BEFORE values
+PRINT ""
+PRINT "=== BEFORE (current garbage values) ==="
+PRINT "  updateCount         = " Var.VALUE(g_ecuMDiag.updateCount)
+PRINT "  diagSkipCount       = " Var.VALUE(g_ecuMDiag.diagSkipCount)
+PRINT "  overallCpuLoad      = " Var.VALUE(g_ecuMDiag.overallCpuLoad)
+PRINT "  s_accumTotalCycles  = " Var.VALUE(s_accumTotalCycles)
+PRINT "  tracker[0].handle   = " Var.VALUE(s_taskTracker[0].handle)
+PRINT "  tracker[0].accumCy  = " Var.VALUE(s_taskTracker[0].accumCycles)
+
+; Step 3: Force-zero all suspect variables via debugger
+PRINT ""
+PRINT "  Zeroing variables via debugger..."
+
+; Zero s_taskTracker (256 bytes)
+Var.Set s_taskTracker = 0
+; Can't zero array directly with Var.Set, use Data.Set
+&tracker_addr=Var.ADDRESS(s_taskTracker)
+Data.Set &tracker_addr++(&tracker_addr+0xFF) 0x0
+
+; Zero key g_ecuMDiag fields
+Var.Set g_ecuMDiag.updateCount = 0
+Var.Set g_ecuMDiag.diagSkipCount = 0
+Var.Set g_ecuMDiag.overallCpuLoad = 0
+
+; Zero accumulators
+Var.Set s_accumTotalCycles = 0
+Var.Set s_prevTotalRuntime = 0
+
+PRINT "  Variables zeroed."
+
+; Step 4: Verify zeroing
+PRINT ""
+PRINT "=== AFTER ZEROING (should all be 0) ==="
+PRINT "  updateCount         = " Var.VALUE(g_ecuMDiag.updateCount)
+PRINT "  diagSkipCount       = " Var.VALUE(g_ecuMDiag.diagSkipCount)
+PRINT "  tracker[0].handle   = " Var.VALUE(s_taskTracker[0].handle)
+PRINT "  s_accumTotalCycles  = " Var.VALUE(s_accumTotalCycles)
+
+; Step 5: Resume CPU for 5 seconds
+PRINT ""
+PRINT "  Resuming CPU for 5 seconds..."
+Go
+WAIT 5.s
+Break
+PRINT "  CPU halted after 5 seconds."
+
+; Step 6: Read AFTER values
+PRINT ""
+PRINT "=== AFTER 5 SECONDS ==="
+PRINT "  updateCount         = " Var.VALUE(g_ecuMDiag.updateCount)
+PRINT "  diagSkipCount       = " Var.VALUE(g_ecuMDiag.diagSkipCount)
+PRINT "  overallCpuLoad      = " Var.VALUE(g_ecuMDiag.overallCpuLoad)
+PRINT "  uptimeSeconds       = " Var.VALUE(g_ecuMDiag.uptimeSeconds)
+PRINT "  s_accumTotalCycles  = " Var.VALUE(s_accumTotalCycles)
+PRINT "  s_lastUpdateTick    = " Var.VALUE(s_lastUpdateTick)
+PRINT "  EcuM_Period_10ms_cnt= " Var.VALUE(EcuM_Period_10ms_cnt)
+
+PRINT ""
+PRINT "=== Tracker Slots After 5s ==="
+&i=0
+WHILE &i<8.
+(
+  PRINT "  [" &i "] handle=" Var.VALUE(s_taskTracker[&i].handle) "  prevRT=" Var.VALUE(s_taskTracker[&i].prevRuntime) "  accumCy=" Var.VALUE(s_taskTracker[&i].accumCycles)
+  &i=&i+1
+)
+
+PRINT ""
+PRINT "=== Per-Task CPU Load After 5s ==="
+&i=0
+WHILE &i<Var.VALUE(g_ecuMDiag.taskCount)
+(
+  PRINT "  Task[" &i "]: cpuLoad=" Var.VALUE(g_ecuMDiag.tasks[&i].cpuLoadPercent) "  name=" Var.STRing(g_ecuMDiag.tasks[&i].name)
+  &i=&i+1
+)
+
+PRINT ""
+PRINT "============================================================"
+PRINT " VERDICT:"
+PRINT "  If updateCount ~ 5 and tracker handles are 0x3442xxxx"
+PRINT "    -> memset in EcuM_Diag_Init was optimized away"
+PRINT "  If updateCount is garbage or tracker still has 0xFF pattern"
+PRINT "    -> active memory corruption from another source"
+PRINT "============================================================"
+
+ENDDO

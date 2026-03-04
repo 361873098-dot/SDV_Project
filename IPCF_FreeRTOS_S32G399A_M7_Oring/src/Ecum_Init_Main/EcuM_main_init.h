@@ -52,8 +52,8 @@ typedef struct {
   uint8 priority;            /**< Current task priority */
   uint8 state;               /**< Task state:
                                 0=Running,1=Ready,2=Blocked,3=Suspended,4=Deleted */
-  uint32 runtimeCounter;     /**< Total runtime counter value (ticks) */
-  uint8 cpuLoadPercent;      /**< CPU usage % (0-100) */
+  unsigned long long runtimeCounter; /**< Total runtime counter value (ticks) */
+  uint8 cpuLoadPercent;              /**< CPU usage % (0-100) */
 } EcuM_TaskDiag_t;
 
 /**
@@ -74,12 +74,13 @@ typedef struct {
   uint8 heapUsagePercent; /**< Heap usage % = (total - free) / total * 100 */
 
   /* CPU load diagnostics */
-  uint32 totalRuntime;  /**< Total runtime counter (ticks) */
-  uint8 overallCpuLoad; /**< Overall CPU load % = 100 - idle% */
+  unsigned long long totalRuntime; /**< Total runtime counter (ticks) */
+  uint8 overallCpuLoad;            /**< Overall CPU load % = 100 - idle% */
 
   /* System info */
   uint32 uptimeSeconds; /**< System uptime (seconds) */
   uint32 updateCount;   /**< Diagnostic update counter */
+  uint32 diagSkipCount; /**< Number of skipped updates (interval > 5s) */
 } EcuM_DiagInfo_t;
 
 /*==================================================================================================
@@ -122,6 +123,14 @@ void EcuM_PreOS_Init(void);
 void EcuM_StartOS(void);
 
 /**
+ * @brief Initialize diagnostic subsystem
+ *
+ * Clears all diagnostic state to known-good zeros.
+ * Must be called once from main() before vTaskStartScheduler().
+ */
+void EcuM_Diag_Init(void);
+
+/**
  * @brief Update RTOS diagnostic information
  *
  * Collects CPU load, stack usage and heap info for all RTOS tasks.
@@ -129,6 +138,7 @@ void EcuM_StartOS(void);
  * Results are stored in g_ecuMDiag for Trace32 observation.
  *
  * @note Call from RTOS task context only (not from ISR).
+ * @pre EcuM_Diag_Init() must have been called once before first invocation.
  */
 void EcuM_Diag_Update(void);
 

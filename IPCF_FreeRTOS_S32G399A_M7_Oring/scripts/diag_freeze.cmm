@@ -1,0 +1,61 @@
+; =============================================================================
+; diag_freeze.cmm - Diagnose "system frozen but CPU still running"
+; All output in a single AREA window.
+; =============================================================================
+
+; Break the CPU first
+BREAK
+
+; Open a single AREA window for all output
+AREA.Create DIAG
+AREA.Select DIAG
+AREA.OPEN DIAG
+AREA.Clear DIAG
+
+PRINT "============================================================"
+PRINT "  FREEZE DIAGNOSTIC REPORT"
+PRINT "============================================================"
+PRINT ""
+
+; --- 1. PC and core registers ---
+PRINT "--- [1] Core Registers ---"
+PRINT "  PC  = " Register(PC)
+PRINT "  LR  = " Register(LR)
+PRINT "  MSP = " Register(MSP)
+PRINT "  PSP = " Register(PSP)
+PRINT ""
+
+; --- 2. Fault registers ---
+PRINT "--- [2] Fault Registers ---"
+PRINT "  CFSR  = 0x" Data.Long(ASD:0xE000ED28)
+PRINT "  HFSR  = 0x" Data.Long(ASD:0xE000ED2C)
+PRINT "  DFSR  = 0x" Data.Long(ASD:0xE000ED30)
+PRINT "  MMFAR = 0x" Data.Long(ASD:0xE000ED34)
+PRINT "  BFAR  = 0x" Data.Long(ASD:0xE000ED38)
+PRINT ""
+
+; --- 3. Current FreeRTOS task ---
+PRINT "--- [3] FreeRTOS Current Task ---"
+PRINT "  pxCurrentTCB = 0x" Var.VALUE(pxCurrentTCB)
+PRINT "  Task Name    = " Var.STRing(pxCurrentTCB->pcTaskName)
+PRINT ""
+
+; --- 4. Application counters ---
+PRINT "--- [4] Application Counters ---"
+PRINT "  updateCount        = " Var.VALUE(g_ecuMDiag.updateCount)
+PRINT "  uptimeSeconds      = " Var.VALUE(g_ecuMDiag.uptimeSeconds)
+PRINT "  EcuM_Period_10ms   = " Var.VALUE(EcuM_Period_10ms_cnt)
+PRINT ""
+
+; --- 5. Symbol at PC ---
+PRINT "--- [5] Function at PC ---"
+PRINT "  " sYmbol.Name(D:Register(PC))
+PRINT ""
+
+PRINT "============================================================"
+PRINT "  Check: Is PC in a fault handler or while(1) loop?"
+PRINT "  Check: Is CFSR non-zero (fault occurred)?"
+PRINT "  Check: Which task was running when it froze?"
+PRINT "============================================================"
+
+ENDDO

@@ -1,0 +1,45 @@
+; =============================================================================
+; diag_address_check.cmm — Verify s_taskTracker address and surroundings
+; =============================================================================
+
+AREA.RESet
+WinPOS 0. 0. 120. 30.
+AREA.view
+AREA.Select A000
+AREA.Clear
+
+PRINT "============================================================"
+PRINT " Address Overlap Check"
+PRINT "============================================================"
+
+PRINT ""
+PRINT "=== Variable Addresses ==="
+PRINT "  &s_taskTracker        = " Var.ADDRESS(s_taskTracker)
+PRINT "  sizeof(s_taskTracker) = " Var.SIZEOF(s_taskTracker)
+PRINT "  &s_prevTotalRuntime   = " Var.ADDRESS(s_prevTotalRuntime)
+PRINT "  &s_accumTotalCycles   = " Var.ADDRESS(s_accumTotalCycles)
+PRINT "  &s_lastUpdateTick     = " Var.ADDRESS(s_lastUpdateTick)
+PRINT "  &g_ecuMDiag           = " Var.ADDRESS(g_ecuMDiag)
+PRINT "  &s_taskStatusArray    = " Var.ADDRESS(s_taskStatusArray)
+PRINT "  sizeof(s_taskStatusArray) = " Var.SIZEOF(s_taskStatusArray)
+PRINT "  &EcuM_Period_10ms_cnt = " Var.ADDRESS(EcuM_Period_10ms_cnt)
+
+; Check for IPCF shared memory pointers
+PRINT ""
+PRINT "=== IPCF Related ==="
+PRINT "  &g_appData            = " Var.ADDRESS(g_appData)
+PRINT "  sizeof(g_appData)     = " Var.SIZEOF(g_appData)
+PRINT "  &g_rxQueue            = " Var.ADDRESS(g_rxQueue)
+
+; Linker symbols
+PRINT ""
+PRINT "=== Linker Boundaries ==="
+PRINT "  __sram_bss_start      = " address.offset(__sram_bss_start)
+PRINT "  __sram_bss_end        = " address.offset(__sram_bss_end)
+
+PRINT ""
+PRINT "============================================================"
+PRINT " DONE"
+PRINT "============================================================"
+
+ENDDO

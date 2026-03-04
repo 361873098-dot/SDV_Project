@@ -1,0 +1,39 @@
+// T32DEMO Thu Feb 26 15:15:12 2026
+
+B::
+
+TOOLBAR   ON
+STATUSBAR ON
+FramePOS 10.571,19.25,,,Maximized
+WinPAGE.RESet
+
+WinPAGE.Create P000
+WinCLEAR
+
+WinPOS 145.0 36.417 105. 25. 5. 0. W002
+Frame /Locals /Caller
+
+WinPOS 10.143 1.25 116. 16. 16. 1. W004
+WinTABS 10. 10. 25.
+List.auto
+
+WinPOS 27.857 6.25 120. 54. 0. 0. W000
+AREA.view MAIN
+
+WinPOS 137.14 -0.16667 100. 65. 0. 0. W001
+Var.Watch
+
+Var.AddWatch task_M7_0_10ms_cnt
+Var.AddWatch EcuM_Period_10ms_cnt
+Var.AddWatch g_EcuM_InitDebug
+Var.AddWatch g_canTxCount
+Var.AddWatch g_canRxCount
+Var.AddWatch g_txData0
+Var.AddWatch g_txData1
+Var.AddWatch g_RxData0
+Var.AddWatch g_RxData1
+Var.AddWatch g_Spi_Baremetal_Debug
+
+WinPAGE.select P000
+
+ENDDO
