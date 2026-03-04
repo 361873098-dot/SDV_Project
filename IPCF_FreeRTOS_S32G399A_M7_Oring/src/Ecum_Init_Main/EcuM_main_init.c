@@ -17,6 +17,7 @@ extern "C" {
 /* EcuM module headers */
 
 #include "EcuM_main_init.h"
+#include "EcuM_CpuLoadTest.h"
 
 /* RTD Drivers Headers */
 #include "CDD_I2c.h"
@@ -61,12 +62,15 @@ extern "C" {
  *                                         INIT  VARIABLES
  *==================================================================================================*/
 
-/** Global diagnostic data instance */
-volatile EcuM_DiagInfo_t g_ecuMDiag;
+/** Global diagnostic data instance (non-cacheable: Trace32 reads SRAM directly)
+ */
+volatile EcuM_DiagInfo_t g_ecuMDiag
+    __attribute__((section(".mcal_bss_no_cacheable")));
 
 /** Temporary buffer for uxTaskGetSystemState - static to avoid large stack
  * usage */
-static TaskStatus_t s_taskStatusArray[ECUM_DIAG_MAX_TASKS];
+static TaskStatus_t s_taskStatusArray[ECUM_DIAG_MAX_TASKS]
+    __attribute__((section(".mcal_bss_no_cacheable")));
 
 /*==================================================================================================*/
 
@@ -122,42 +126,131 @@ unsigned long ulMainGetRunTimeCounterValue(void) {
 }
 
 /*==================================================================================================
- *                                         PRIVATE FUNCTIONS
+ * PRIVATE VARIABLES
  *==================================================================================================*/
 
-/** Maximum FreeRTOS task number for differential tracking */
-#define ECUM_MAX_TASK_NUMBER (16U)
+/** Maximum number of tasks we can track differentials for (protects memory) */
+#define ECUM_MAX_TRACKED_TASKS (16U)
 
-/** Previous runtime counters indexed by FreeRTOS xTaskNumber (stable ID) */
-static uint32 s_prevRuntimeByTaskNum[ECUM_MAX_TASK_NUMBER];
+/** Internal structure to safely track task runtime across updates */
+typedef struct {
+  TaskHandle_t handle;            /* Unique FreeRTOS task handle */
+  uint32 prevRuntime;             /* Previous DWT counter snapshot */
+  unsigned long long accumCycles; /* 64-bit accumulated RAW CPU cycles */
+} EcuM_TaskTracking_t;
+
+/** Tracking array mapping TaskHandle to its runtime history */
+static EcuM_TaskTracking_t s_taskTracker[ECUM_MAX_TRACKED_TASKS]
+    __attribute__((section(".mcal_bss_no_cacheable")));
 
 /** Previous total runtime for delta calculation */
-static uint32 s_prevTotalRuntime = 0U;
+static uint32 s_prevTotalRuntime
+    __attribute__((section(".mcal_bss_no_cacheable")));
+
+/** 64-bit Accumulated total RAW CPU cycles (avoids microsecond truncation
+ * drift) */
+static unsigned long long s_accumTotalCycles
+    __attribute__((section(".mcal_bss_no_cacheable")));
+
+/** Timestamp to detect if update period exceeds DWT wrap time (10.7 seconds) */
+static TickType_t s_lastUpdateTick
+    __attribute__((section(".mcal_bss_no_cacheable")));
+
+/*==================================================================================================
+ * PRIVATE FUNCTIONS
+ *==================================================================================================*/
+
+/**
+ * @brief Initialize diagnostic subsystem (call once from main, before
+ * scheduler)
+ *
+ * Clears all diagnostic state to known-good zeros.
+ * Must be called before any RTOS task runs EcuM_Diag_Update().
+ */
+void EcuM_Diag_Init(void) {
+  volatile uint8 *p;
+  uint32 i;
+
+  /* Zero g_ecuMDiag: volatile-safe, compiler CANNOT optimize this away */
+  p = (volatile uint8 *)&g_ecuMDiag;
+  for (i = 0U; i < sizeof(g_ecuMDiag); i++) {
+    p[i] = 0U;
+  }
+
+  /* Zero s_taskTracker: not volatile, but use same pattern for safety */
+  {
+    volatile uint8 *q = (volatile uint8 *)s_taskTracker;
+    for (i = 0U; i < sizeof(s_taskTracker); i++) {
+      q[i] = 0U;
+    }
+  }
+
+  s_prevTotalRuntime = 0U;
+  s_accumTotalCycles = 0ULL;
+  s_lastUpdateTick = 0;
+}
 
 /**
  * @brief Update RTOS diagnostic information
  *
- * Uses differential calculation for CPU load:
- *   - Computes delta = currentRuntime - previousRuntime (unsigned, handles
- * overflow)
- *   - CPU% = deltaTask / (deltaTotal / 100)
- * This gives accurate per-second CPU load regardless of counter overflow.
+ * Safely handles DWT 32-bit overflow using unsigned subtraction.
+ * Tracks tasks by TaskHandle_t to support dynamic task deletion/creation.
+ * Eliminates microsecond truncation drift by accumulating raw 400MHz cycles.
  *
- * Runtime counter unit: raw CPU cycles (400MHz).
- * Displayed runtimeCounter: converted to microseconds for readability.
+ * @pre EcuM_Diag_Init() must have been called once before first invocation.
  */
 void EcuM_Diag_Update(void) {
   UBaseType_t uxArraySize;
   uint32 ulTotalRunTime;
   uint32 i;
+  uint8 j;
   uint8 idleCpuPercent = 0U;
   uint32 deltaTotalRuntime;
   uint32 deltaTaskRuntime;
   uint32 divisor;
-  UBaseType_t taskNum;
+  uint8 trackerSlot;
+  TaskHandle_t currentHandle;
+  TaskHandle_t idleHandle;
+  TickType_t currentTick;
 
   /* ========================================================================
-   * 1. Get system state for all tasks
+   * 1. Check polling frequency safety (The 10.73s Trap Fix)
+   * ======================================================================== */
+  currentTick = xTaskGetTickCount();
+  if (s_lastUpdateTick != 0) {
+    /* DWT cycle counter wraps every 10.73s at 400MHz. Unsigned subtraction
+       gives correct deltas for ANY interval < 10.73s. We only skip when the
+       interval approaches the wrap point (10s threshold = 0.73s safety). */
+    if ((currentTick - s_lastUpdateTick) >= pdMS_TO_TICKS(10000)) {
+      /* Reset total runtime baseline */
+      uxArraySize = uxTaskGetNumberOfTasks();
+      if (uxArraySize > ECUM_DIAG_MAX_TASKS) {
+        uxArraySize = ECUM_DIAG_MAX_TASKS;
+      }
+      uxArraySize =
+          uxTaskGetSystemState(s_taskStatusArray, uxArraySize, &ulTotalRunTime);
+      s_prevTotalRuntime = ulTotalRunTime;
+
+      /* Reset per-task baselines */
+      for (i = 0U; i < uxArraySize; i++) {
+        for (j = 0U; j < ECUM_MAX_TRACKED_TASKS; j++) {
+          if (s_taskTracker[j].handle == s_taskStatusArray[i].xHandle) {
+            s_taskTracker[j].prevRuntime =
+                s_taskStatusArray[i].ulRunTimeCounter;
+            break;
+          }
+        }
+      }
+
+      s_lastUpdateTick = currentTick;
+      g_ecuMDiag.diagSkipCount++;
+      return; /* Skip this cycle, next call will have clean baselines */
+    }
+  }
+  s_lastUpdateTick = currentTick;
+
+  /* ========================================================================
+   * 2. Get system state for all tasks
    * ======================================================================== */
   uxArraySize = uxTaskGetNumberOfTasks();
   if (uxArraySize > ECUM_DIAG_MAX_TASKS) {
@@ -166,12 +259,11 @@ void EcuM_Diag_Update(void) {
 
   uxArraySize =
       uxTaskGetSystemState(s_taskStatusArray, uxArraySize, &ulTotalRunTime);
-
   g_ecuMDiag.taskCount = (uint8)uxArraySize;
 
   /* ========================================================================
-   * 2. Differential calculation setup
-   *    deltaTotalRuntime handles uint32 overflow correctly via unsigned math
+   * 3. Differential calculation setup
+   * deltaTotalRuntime handles uint32 overflow correctly via unsigned math
    * ======================================================================== */
   deltaTotalRuntime = ulTotalRunTime - s_prevTotalRuntime;
 
@@ -181,10 +273,16 @@ void EcuM_Diag_Update(void) {
     divisor = 1U; /* Prevent division by zero on first call */
   }
 
+  /* Note: Requires INCLUDE_xTaskGetIdleTaskHandle set to 1 in FreeRTOSConfig.h
+   */
+  idleHandle = xTaskGetIdleTaskHandle();
+
   /* ========================================================================
-   * 3. Fill per-task diagnostic info
+   * 4. Fill per-task diagnostic info
    * ======================================================================== */
   for (i = 0U; i < uxArraySize; i++) {
+    currentHandle = s_taskStatusArray[i].xHandle;
+
     /* Copy task name */
     strncpy((char *)g_ecuMDiag.tasks[i].name, s_taskStatusArray[i].pcTaskName,
             ECUM_DIAG_TASK_NAME_LEN - 1U);
@@ -199,44 +297,79 @@ void EcuM_Diag_Update(void) {
         (uint8)s_taskStatusArray[i].uxCurrentPriority;
     g_ecuMDiag.tasks[i].state = (uint8)s_taskStatusArray[i].eCurrentState;
 
-    /* Runtime counter - convert from CPU cycles to microseconds for display */
-    g_ecuMDiag.tasks[i].runtimeCounter =
-        (uint32)(s_taskStatusArray[i].ulRunTimeCounter / 400U);
+    /* ---- Dynamic Task Tracking (Fix for xTaskNumber flaw) ---- */
+    trackerSlot = 255U; /* Invalid slot by default */
 
-    /* ---- Differential CPU load calculation ---- */
-    taskNum = s_taskStatusArray[i].xTaskNumber;
-    if (taskNum < ECUM_MAX_TASK_NUMBER) {
-      /* Delta = current - previous (unsigned subtraction handles overflow) */
-      deltaTaskRuntime = (uint32)s_taskStatusArray[i].ulRunTimeCounter -
-                         s_prevRuntimeByTaskNum[taskNum];
+    /* Search for existing task or find an empty slot */
+    for (j = 0U; j < ECUM_MAX_TRACKED_TASKS; j++) {
+      if (s_taskTracker[j].handle == currentHandle) {
+        trackerSlot = j; /* Found existing task */
+        break;
+      }
+      if ((s_taskTracker[j].handle == NULL) && (trackerSlot == 255U)) {
+        trackerSlot = j; /* Found first available empty slot */
+      }
+    }
 
-      g_ecuMDiag.tasks[i].cpuLoadPercent = (uint8)(deltaTaskRuntime / divisor);
+    if (trackerSlot < ECUM_MAX_TRACKED_TASKS) {
+      /* If it's a new task, initialize its tracking baseline */
+      if (s_taskTracker[trackerSlot].handle != currentHandle) {
+        s_taskTracker[trackerSlot].handle = currentHandle;
+        /* CPU% baseline: start from "now" so first delta=0, no spike */
+        s_taskTracker[trackerSlot].prevRuntime =
+            s_taskStatusArray[i].ulRunTimeCounter;
+        /* Cumulative time: capture runtime already accumulated since creation
+         */
+        s_taskTracker[trackerSlot].accumCycles =
+            (unsigned long long)s_taskStatusArray[i].ulRunTimeCounter;
+      }
 
-      /* Clamp to 100% max (rounding can cause slight over) */
+      /* Delta = current - previous (unsigned subtraction handles 32-bit
+       * overflow) */
+      deltaTaskRuntime = s_taskStatusArray[i].ulRunTimeCounter -
+                         s_taskTracker[trackerSlot].prevRuntime;
+
+      /* Calculate CPU Load % with rounding */
+      g_ecuMDiag.tasks[i].cpuLoadPercent =
+          (uint8)((((unsigned long long)deltaTaskRuntime * 10ULL) / divisor +
+                   5ULL) /
+                  10ULL);
+
       if (g_ecuMDiag.tasks[i].cpuLoadPercent > 100U) {
         g_ecuMDiag.tasks[i].cpuLoadPercent = 100U;
       }
 
+      /* Accumulate RAW 64-bit cycles (Fix for precision drift) */
+      s_taskTracker[trackerSlot].accumCycles +=
+          (unsigned long long)deltaTaskRuntime;
+
+      /* Convert accumulated raw cycles to microseconds for the final diagnostic
+       * structure */
+      g_ecuMDiag.tasks[i].runtimeCounter =
+          s_taskTracker[trackerSlot].accumCycles / 400ULL;
+
       /* Save current value for next differential */
-      s_prevRuntimeByTaskNum[taskNum] =
-          (uint32)s_taskStatusArray[i].ulRunTimeCounter;
+      s_taskTracker[trackerSlot].prevRuntime =
+          s_taskStatusArray[i].ulRunTimeCounter;
     } else {
+      /* Tracking array is full */
       g_ecuMDiag.tasks[i].cpuLoadPercent = 0U;
+      g_ecuMDiag.tasks[i].runtimeCounter = 0ULL;
     }
 
-    /* Track idle task for overall CPU load calculation */
-    if (s_taskStatusArray[i].uxCurrentPriority == tskIDLE_PRIORITY) {
+    /* Track idle task (Fix for Priority 0 overlap) */
+    if (currentHandle == idleHandle) {
       idleCpuPercent = g_ecuMDiag.tasks[i].cpuLoadPercent;
     }
   }
 
-  /* Clear remaining unused task slots */
+  /* Clear remaining unused task slots in diagnostic struct */
   for (; i < ECUM_DIAG_MAX_TASKS; i++) {
     memset((void *)&g_ecuMDiag.tasks[i], 0, sizeof(EcuM_TaskDiag_t));
   }
 
   /* ========================================================================
-   * 4. Overall CPU load = 100% - idle%
+   * 5. Overall CPU load = 100% - idle%
    * ======================================================================== */
   g_ecuMDiag.overallCpuLoad =
       (idleCpuPercent <= 100U) ? (100U - idleCpuPercent) : 0U;
@@ -244,11 +377,12 @@ void EcuM_Diag_Update(void) {
   /* Save total runtime for next differential */
   s_prevTotalRuntime = ulTotalRunTime;
 
-  /* Convert totalRuntime to microseconds for display */
-  g_ecuMDiag.totalRuntime = ulTotalRunTime / 400U;
+  /* Accumulate 64-bit total RAW cycles, then convert to microseconds */
+  s_accumTotalCycles += (unsigned long long)deltaTotalRuntime;
+  g_ecuMDiag.totalRuntime = s_accumTotalCycles / 400ULL;
 
   /* ========================================================================
-   * 5. Heap diagnostics
+   * 6. Heap diagnostics
    * ======================================================================== */
   g_ecuMDiag.freeHeapSize = (uint32)xPortGetFreeHeapSize();
   g_ecuMDiag.minEverFreeHeapSize = (uint32)xPortGetMinimumEverFreeHeapSize();
@@ -261,12 +395,11 @@ void EcuM_Diag_Update(void) {
   }
 
   /* ========================================================================
-   * 6. System uptime and update counter
+   * 7. System uptime and update counter
    * ======================================================================== */
   g_ecuMDiag.uptimeSeconds = (uint32)(xTaskGetTickCount() / configTICK_RATE_HZ);
   g_ecuMDiag.updateCount++;
 }
-
 /*==================================================================================================
  *										   main()
  * Entry
@@ -276,8 +409,11 @@ void EcuM_Diag_Update(void) {
  * @brief Application entry point
  */
 int main(void) {
-  /* Initialize diagnostic data (SRAM may not be auto-zeroed) */
-  memset((void *)&g_ecuMDiag, 0, sizeof(EcuM_DiagInfo_t));
+  /* Initialize diagnostic subsystem (must be first, before any RTOS call) */
+  EcuM_Diag_Init();
+
+  /* CPU load stress-test (only active when ECUM_CPULOAD_TEST_ENABLE == 1) */
+  EcuM_CpuLoadTest_Init();
 
   Clock_Ip_Init(&Mcu_aClockConfigPB[0]);
 

@@ -1460,7 +1460,7 @@
                            <setting name="INCLUDE_xTaskGetCurrentTaskHandle" value="true"/>
                            <setting name="INCLUDE_uxTaskGetStackHighWaterMark" value="true"/>
                            <setting name="INCLUDE_uxTaskGetStackHighWaterMark2" value="false"/>
-                           <setting name="INCLUDE_xTaskGetIdleTaskHandle" value="false"/>
+                           <setting name="INCLUDE_xTaskGetIdleTaskHandle" value="true"/>
                            <setting name="INCLUDE_eTaskGetState" value="true"/>
                            <setting name="INCLUDE_xEventGroupSetBitFromISR" value="true"/>
                            <setting name="INCLUDE_xTimerPendFunctionCall" value="true"/>

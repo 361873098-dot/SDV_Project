@@ -42,9 +42,9 @@
 									<listOptionValue builtIn="false" value="../IPCF/src/common"/>
 									<listOptionValue builtIn="false" value="../IPCF/src/hw"/>
 									<listOptionValue builtIn="false" value="../IPCF/src/os"/>
-									<listOptionValue builtIn="false" value="../FreeRTOS/Source/include"/>
 									<listOptionValue builtIn="false" value="../FreeRTOS/Source/portable/GCC/ARM_CM7/r0p1"/>
 									<listOptionValue builtIn="false" value="../IPCF/src/hw/s32g3xx"/>
+									<listOptionValue builtIn="false" value="../FreeRTOS/Source/include"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/TJA145A_Spi_Ip}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/FlexCAN_Ip}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/src/Ecum_Init_Main}&quot;"/>
@@ -161,9 +161,9 @@
 									<listOptionValue builtIn="false" value="../IPCF/src/common"/>
 									<listOptionValue builtIn="false" value="../IPCF/src/hw"/>
 									<listOptionValue builtIn="false" value="../IPCF/src/os"/>
-									<listOptionValue builtIn="false" value="../FreeRTOS/Source/include"/>
 									<listOptionValue builtIn="false" value="../FreeRTOS/Source/portable/GCC/ARM_CM7/r0p1"/>
 									<listOptionValue builtIn="false" value="../IPCF/src/hw/s32g3xx"/>
+									<listOptionValue builtIn="false" value="../FreeRTOS/Source/include"/>
 									<listOptionValue builtIn="false" value="/IPCF_FreeRTOS_S32G399A_M7_Oring/src"/>
 									<listOptionValue builtIn="false" value="&quot;${ProjDirPath}/generate/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${ProjDirPath}/RTD/include&quot;"/>
@@ -257,9 +257,9 @@
 									<listOptionValue builtIn="false" value="../IPCF/src/common"/>
 									<listOptionValue builtIn="false" value="../IPCF/src/hw"/>
 									<listOptionValue builtIn="false" value="../IPCF/src/os"/>
-									<listOptionValue builtIn="false" value="../FreeRTOS/Source/include"/>
 									<listOptionValue builtIn="false" value="../FreeRTOS/Source/portable/GCC/ARM_CM7/r0p1"/>
 									<listOptionValue builtIn="false" value="../IPCF/src/hw/s32g3xx"/>
+									<listOptionValue builtIn="false" value="../FreeRTOS/Source/include"/>
 									<listOptionValue builtIn="false" value="/IPCF_FreeRTOS_S32G399A_M7_Oring/src"/>
 									<listOptionValue builtIn="false" value="&quot;${ProjDirPath}/generate/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${ProjDirPath}/RTD/include&quot;"/>
@@ -367,9 +367,9 @@
 									<listOptionValue builtIn="false" value="../IPCF/src/common"/>
 									<listOptionValue builtIn="false" value="../IPCF/src/hw"/>
 									<listOptionValue builtIn="false" value="../IPCF/src/os"/>
-									<listOptionValue builtIn="false" value="../FreeRTOS/Source/include"/>
 									<listOptionValue builtIn="false" value="../FreeRTOS/Source/portable/GCC/ARM_CM7/r0p1"/>
 									<listOptionValue builtIn="false" value="../IPCF/src/hw/s32g3xx"/>
+									<listOptionValue builtIn="false" value="../FreeRTOS/Source/include"/>
 									<listOptionValue builtIn="false" value="/IPCF_FreeRTOS_S32G399A_M7_Oring/src"/>
 									<listOptionValue builtIn="false" value="&quot;${ProjDirPath}/generate/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${ProjDirPath}/RTD/include&quot;"/>
