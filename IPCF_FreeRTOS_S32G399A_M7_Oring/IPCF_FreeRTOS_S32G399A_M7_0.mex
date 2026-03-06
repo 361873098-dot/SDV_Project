@@ -1146,11 +1146,6 @@
                   <data type="Version">0.1.0</data>
                </feature>
             </dependency>
-            <dependency resourceType="Tool" resourceId="Clocks" description="外围设备工具需要 Clocks 工具，但它已被禁用。" problem_level="2" source="Peripherals">
-               <feature name="enabled" evaluation="equal">
-                  <data>true</data>
-               </feature>
-            </dependency>
          </dependencies>
          <generated_project_files>
             <file path="board/Siul2_Port_Ip_Cfg.h" update_enabled="true"/>
@@ -3108,6 +3103,26 @@
                                        <setting name="PortPinSlewRate" value="SRE_3_3V_50MHZ_b100"/>
                                        <array name="PortPinEcucPartitionRef"/>
                                     </struct>
+                                    <struct name="10">
+                                       <setting name="Name" value="EthSwitchRst_PA_13"/>
+                                       <setting name="PortPinPue" value="false"/>
+                                       <setting name="PortPinPus" value="false"/>
+                                       <setting name="PortPinSafeMode" value="false"/>
+                                       <setting name="PortPinOde" value="false"/>
+                                       <setting name="PortPinWithReadBack" value="false"/>
+                                       <setting name="PortPinRcvr" value="false"/>
+                                       <setting name="PortPinDirectionChangeable" value="true"/>
+                                       <setting name="PortPinModeChangeable" value="true"/>
+                                       <setting name="PortPinSiul2Instance" value="SIUL2_0"/>
+                                       <setting name="PortPinId" value="11"/>
+                                       <setting name="PortPinPcr" value="13"/>
+                                       <setting name="PortPinDirection" value="PORT_PIN_OUT"/>
+                                       <setting name="PortPinInitialMode" value="PORT_GPIO_MODE"/>
+                                       <setting name="PortPinMode" value="GPIO"/>
+                                       <setting name="PortPinLevelValue" value="PORT_PIN_LEVEL_LOW"/>
+                                       <setting name="PortPinSlewRate" value="SRE_3_3V_50MHZ_b100"/>
+                                       <array name="PortPinEcucPartitionRef"/>
+                                    </struct>
                                  </array>
                               </struct>
                            </array>
@@ -3331,6 +3346,19 @@
                                     <struct name="0">
                                        <setting name="Name" value="IGN_KEY"/>
                                        <setting name="DioChannelId" value="9"/>
+                                       <array name="DioChannelEcucPartitionRef"/>
+                                    </struct>
+                                 </array>
+                                 <array name="DioChannelGroup"/>
+                                 <array name="DioPortEcucPartitionRef"/>
+                              </struct>
+                              <struct name="3">
+                                 <setting name="Name" value="DioPort_3"/>
+                                 <setting name="DioPortId" value="0"/>
+                                 <array name="DioChannel">
+                                    <struct name="0">
+                                       <setting name="Name" value="EthSwitchRst"/>
+                                       <setting name="DioChannelId" value="13"/>
                                        <array name="DioChannelEcucPartitionRef"/>
                                     </struct>
                                  </array>

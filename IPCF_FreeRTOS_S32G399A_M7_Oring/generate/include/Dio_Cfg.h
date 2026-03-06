@@ -260,6 +260,17 @@ extern "C" {
 *
 */
 #define DioConf_DioChannel_IGN_KEY  ((uint16)0x0039U)
+/* ---------- DioPort_3 ---------- */
+
+/**
+* @brief          Symbolic name for the port DioPort_3.
+*/
+#define DioConf_DioPort_DioPort_3  ((uint8)0x00U)
+/**
+* @brief          Symbolic name for the channel EthSwitchRst.
+*
+*/
+#define DioConf_DioChannel_EthSwitchRst  ((uint16)0x000dU)
 
 /*=================================================================================================
 *                                             ENUMS

@@ -354,6 +354,31 @@ const Siul2_Port_Ip_PinSettingsConfig g_pin_mux_InitConfigArr[NUM_OF_CONFIGURED_
                                    PORT_INPUT_MUX_NO_INIT,
                                    PORT_INPUT_MUX_NO_INIT
                                  }
+    },
+    {
+        .base                  = IP_SIUL2_0,
+        .pinPortIdx            = 13,
+        .mux                   = PORT_MUX_AS_GPIO,
+        .safeMode              = PORT_SAFE_MODE_DISABLED,
+        .pullConfig            = PORT_INTERNAL_PULL_NOT_ENABLED,
+        .slewRateCtrlSel       = PORT_SLEW_RATE_CONTROL4,
+        .openDrain             = PORT_OPEN_DRAIN_DISABLED,
+        .inputBuffer           = PORT_INPUT_BUFFER_DISABLED,
+        .outputBuffer          = PORT_OUTPUT_BUFFER_ENABLED,
+        .initValue             = 0,
+        .inputMuxReg           = {
+                                   0
+                                 },
+        .inputMux              = {
+                                   PORT_INPUT_MUX_NO_INIT,
+                                   PORT_INPUT_MUX_NO_INIT,
+                                   PORT_INPUT_MUX_NO_INIT,
+                                   PORT_INPUT_MUX_NO_INIT,
+                                   PORT_INPUT_MUX_NO_INIT,
+                                   PORT_INPUT_MUX_NO_INIT,
+                                   PORT_INPUT_MUX_NO_INIT,
+                                   PORT_INPUT_MUX_NO_INIT
+                                 }
     }
 };
 #define PORT_STOP_SEC_CONFIG_DATA_UNSPECIFIED

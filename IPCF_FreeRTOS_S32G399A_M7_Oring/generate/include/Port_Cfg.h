@@ -1607,16 +1607,17 @@ PORT_CONFIG_PB \
 #define PortConf_PortPin_DSPI_5_SCLK_PK_15 7
 #define PortConf_PortPin_DSPI_5_SOUT_PK_13 8
 #define PortConf_PortPin_DSPI_5_SIN_PK_14 9
+#define PortConf_PortPin_EthSwitchRst_PA_13 10
 
 /**
 * @brief The maximum number of configured pins
 */
-#define PORT_MAX_CONFIGURED_PADS_U16   ((uint16)10)
+#define PORT_MAX_CONFIGURED_PADS_U16   ((uint16)11)
 
 /**
 * @brief Number of UnUsed pin array
 */
-#define PORT_MAX_UNUSED_PADS_U16    (132U)
+#define PORT_MAX_UNUSED_PADS_U16    (131U)
 /**
 * @brief Port driver Pre-Compile configuration switch
 */
