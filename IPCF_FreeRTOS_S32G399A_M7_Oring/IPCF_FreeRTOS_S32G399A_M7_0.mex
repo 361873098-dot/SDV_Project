@@ -463,11 +463,11 @@
                   <clock_output id="ENET_LOOPBACK_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
                   <clock_output id="ERM0_CLK.outFreq" value="200/3 MHz" locked="false" accuracy=""/>
                   <clock_output id="FIRCOUT.outFreq" value="48 MHz" locked="false" accuracy=""/>
-                  <clock_output id="FLEXCAN0_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
-                  <clock_output id="FLEXCAN1_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
-                  <clock_output id="FLEXCAN2_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
-                  <clock_output id="FLEXCAN3_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
-                  <clock_output id="FLEXCAN_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
+                  <clock_output id="FLEXCAN0_CLK.outFreq" value="40 MHz" locked="false" accuracy=""/>
+                  <clock_output id="FLEXCAN1_CLK.outFreq" value="40 MHz" locked="false" accuracy=""/>
+                  <clock_output id="FLEXCAN2_CLK.outFreq" value="40 MHz" locked="false" accuracy=""/>
+                  <clock_output id="FLEXCAN3_CLK.outFreq" value="40 MHz" locked="false" accuracy=""/>
+                  <clock_output id="FLEXCAN_CLK.outFreq" value="40 MHz" locked="false" accuracy=""/>
                   <clock_output id="FLEXRAY_CLK.outFreq" value="24 MHz" locked="false" accuracy=""/>
                   <clock_output id="FLEXTIMERA_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
                   <clock_output id="FLEXTIMERB_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
@@ -623,6 +623,7 @@
                   <setting id="MC_CGM_0_MUX_0.sel" value="COREPLL_DFS1" locked="false"/>
                   <setting id="MODULE_CLOCKS.MC_CGM_0_AUX0_MUX.sel" value="COREPLL_DFS1" locked="false"/>
                   <setting id="MODULE_CLOCKS.MC_CGM_0_AUX6_DIV0.scale" value="2" locked="true"/>
+                  <setting id="MODULE_CLOCKS.MC_CGM_0_AUX7_MUX.sel" value="FXOSC_CLK.FXOSCOUT" locked="false"/>
                   <setting id="MODULE_CLOCKS.RTC_CLK_MUX.sel" value="FIRC_CLK" locked="false"/>
                   <setting id="PERIPHPLL_DFS1.scale" value="2.5" locked="true"/>
                   <setting id="PERIPHPLL_DFS2.scale" value="4" locked="true"/>
@@ -1045,94 +1046,99 @@
       </gtm>
       <periphs name="Peripherals" version="14.0" enabled="true" update_project_code="true">
          <dependencies>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.osif" description="osif is not found in the toolchain/IDE project. The project will not compile!" problem_level="2" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.osif" description="工具链/IDE工程中未找到osif。工程不会被编译！" problem_level="2" source="Peripherals">
                <feature name="enabled" evaluation="equal">
                   <data type="Boolean">true</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.osif" description="An unsupported version of the osif in the toolchain/IDE project. Required: ${required_value}, actual: ${actual_value}. The project might not compile correctly." problem_level="1" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.osif" description="工具链/IDE工程不支持osif版本。所需值: ${required_value}, 实际值: ${actual_value}. 工程可能没有被正确编译。" problem_level="1" source="Peripherals">
                <feature name="version" evaluation="equivalent">
                   <data type="Version">1.0.0</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.siul2_port" description="siul2_port is not found in the toolchain/IDE project. The project will not compile!" problem_level="2" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.siul2_port" description="工具链/IDE工程中未找到siul2_port。工程不会被编译！" problem_level="2" source="Peripherals">
                <feature name="enabled" evaluation="equal">
                   <data type="Boolean">true</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.siul2_port" description="An unsupported version of the siul2_port in the toolchain/IDE project. Required: ${required_value}, actual: ${actual_value}. The project might not compile correctly." problem_level="1" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.siul2_port" description="工具链/IDE工程不支持siul2_port版本。所需值: ${required_value}, 实际值: ${actual_value}. 工程可能没有被正确编译。" problem_level="1" source="Peripherals">
                <feature name="version" evaluation="equivalent">
                   <data type="Version">1.0.0</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.os.freertos" description="freertos is not found in the toolchain/IDE project. The project will not compile!" problem_level="2" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.os.freertos" description="工具链/IDE工程中未找到freertos。工程不会被编译！" problem_level="2" source="Peripherals">
                <feature name="enabled" evaluation="equal">
                   <data type="Boolean">true</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.os.freertos" description="An unsupported version of the freertos in the toolchain/IDE project. Required: ${required_value}, actual: ${actual_value}. The project might not compile correctly." problem_level="1" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.os.freertos" description="工具链/IDE工程不支持freertos版本。所需值: ${required_value}, 实际值: ${actual_value}. 工程可能没有被正确编译。" problem_level="1" source="Peripherals">
                <feature name="version" evaluation="equivalent">
                   <data type="Version">1.0.0</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.Platform" description="Platform is not found in the toolchain/IDE project. The project will not compile!" problem_level="2" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.Platform" description="工具链/IDE工程中未找到Platform。工程不会被编译！" problem_level="2" source="Peripherals">
                <feature name="enabled" evaluation="equal">
                   <data type="Boolean">true</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.Platform" description="An unsupported version of the Platform in the toolchain/IDE project. Required: ${required_value}, actual: ${actual_value}. The project might not compile correctly." problem_level="1" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.Platform" description="工具链/IDE工程不支持Platform版本。所需值: ${required_value}, 实际值: ${actual_value}. 工程可能没有被正确编译。" problem_level="1" source="Peripherals">
                <feature name="version" evaluation="equivalent">
                   <data type="Version">1.0.0</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.port" description="port is not found in the toolchain/IDE project. The project will not compile!" problem_level="2" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.port" description="工具链/IDE工程中未找到port。工程不会被编译！" problem_level="2" source="Peripherals">
                <feature name="enabled" evaluation="equal">
                   <data type="Boolean">true</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.port" description="An unsupported version of the port in the toolchain/IDE project. Required: ${required_value}, actual: ${actual_value}. The project might not compile correctly." problem_level="1" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.port" description="工具链/IDE工程不支持port版本。所需值: ${required_value}, 实际值: ${actual_value}. 工程可能没有被正确编译。" problem_level="1" source="Peripherals">
                <feature name="version" evaluation="equivalent">
                   <data type="Version">1.0.0</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.dio" description="dio is not found in the toolchain/IDE project. The project will not compile!" problem_level="2" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.dio" description="工具链/IDE工程中未找到dio。工程不会被编译！" problem_level="2" source="Peripherals">
                <feature name="enabled" evaluation="equal">
                   <data type="Boolean">true</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.dio" description="An unsupported version of the dio in the toolchain/IDE project. Required: ${required_value}, actual: ${actual_value}. The project might not compile correctly." problem_level="1" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.dio" description="工具链/IDE工程不支持dio版本。所需值: ${required_value}, 实际值: ${actual_value}. 工程可能没有被正确编译。" problem_level="1" source="Peripherals">
                <feature name="version" evaluation="equivalent">
                   <data type="Version">1.0.0</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.cdd_i2c" description="I2c is not found in the toolchain/IDE project. The project will not compile!" problem_level="2" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.cdd_i2c" description="工具链/IDE工程中未找到I2c。工程不会被编译！" problem_level="2" source="Peripherals">
                <feature name="enabled" evaluation="equal">
                   <data type="Boolean">true</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.cdd_i2c" description="An unsupported version of the I2c in the toolchain/IDE project. Required: ${required_value}, actual: ${actual_value}. The project might not compile correctly." problem_level="1" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.cdd_i2c" description="工具链/IDE工程不支持I2c版本。所需值: ${required_value}, 实际值: ${actual_value}. 工程可能没有被正确编译。" problem_level="1" source="Peripherals">
                <feature name="version" evaluation="equivalent">
                   <data type="Version">1.0.0</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.pmic" description="Pmic is not found in the toolchain/IDE project. The project will not compile!" problem_level="2" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.pmic" description="工具链/IDE工程中未找到Pmic。工程不会被编译！" problem_level="2" source="Peripherals">
                <feature name="enabled" evaluation="equal">
                   <data type="Boolean">true</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.pmic" description="An unsupported version of the Pmic in the toolchain/IDE project. Required: ${required_value}, actual: ${actual_value}. The project might not compile correctly." problem_level="1" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.pmic" description="工具链/IDE工程不支持Pmic版本。所需值: ${required_value}, 实际值: ${actual_value}. 工程可能没有被正确编译。" problem_level="1" source="Peripherals">
                <feature name="version" evaluation="equivalent">
                   <data type="Version">1.0.0</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.mcu" description="Mcu is not found in the toolchain/IDE project. The project will not compile!" problem_level="2" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.mcu" description="工具链/IDE工程中未找到Mcu。工程不会被编译！" problem_level="2" source="Peripherals">
                <feature name="enabled" evaluation="equal">
                   <data type="Boolean">true</data>
                </feature>
             </dependency>
-            <dependency resourceType="SWComponent" resourceId="platform.driver.mcu" description="An unsupported version of the Mcu in the toolchain/IDE project. Required: ${required_value}, actual: ${actual_value}. The project might not compile correctly." problem_level="1" source="Peripherals">
+            <dependency resourceType="SWComponent" resourceId="platform.driver.mcu" description="工具链/IDE工程不支持Mcu版本。所需值: ${required_value}, 实际值: ${actual_value}. 工程可能没有被正确编译。" problem_level="1" source="Peripherals">
                <feature name="version" evaluation="equivalent">
                   <data type="Version">1.0.0</data>
+               </feature>
+            </dependency>
+            <dependency resourceType="Tool" resourceId="Clocks" description="外围设备工具需要 Clocks 工具，但它已被禁用。" problem_level="2" source="Peripherals">
+               <feature name="enabled" evaluation="equal">
+                  <data>true</data>
                </feature>
             </dependency>
          </dependencies>
@@ -4154,7 +4160,7 @@
                                     <struct name="McuCgm0ClockMux7">
                                        <setting name="Name" value="McuCgm0ClockMux7"/>
                                        <setting name="McuClockMuxUnderMcuControl" value="true"/>
-                                       <setting name="McuClkMux7_Source" value="FIRC_CLK"/>
+                                       <setting name="McuClkMux7_Source" value="FXOSC_CLK"/>
                                     </struct>
                                     <struct name="McuCgm0ClockMux8">
                                        <setting name="Name" value="McuCgm0ClockMux8"/>
