@@ -438,7 +438,7 @@
 		</configuration>
 	</storageModule>
 	<storageModule moduleId="com.nxp.s32ds.cle.uct.core">
-		<sdkComponents>platform.middleware.ipcf;platform.os.freertos;platform.driver.det;platform.os.freertosCM7;platform.middleware.ipcf_freertos;platform.middleware.ipcf_s32g3xx;platform.os.freertos_heap_4;platform.driver.Platform;platform.driver.clock;platform.driver.rte_mcu;platform.driver.osif;platform.driver.port;platform.driver.rte_port;platform.driver.dio;platform.driver.rte_dio;platform.driver.siul2_port;platform.driver.cdd_i2c;platform.driver.rte_i2c;platform.driver.pmic;platform.driver.rte_pmic;platform.driver.mcu</sdkComponents>
+		<sdkComponents>platform.middleware.ipcf;platform.os.freertos;platform.driver.det;platform.os.freertosCM7;platform.middleware.ipcf_freertos;platform.middleware.ipcf_s32g3xx;platform.os.freertos_heap_4;platform.driver.Platform;platform.driver.clock;platform.driver.rte_mcu;platform.driver.osif;platform.driver.port;platform.driver.rte_port;platform.driver.dio;platform.driver.rte_dio;platform.driver.siul2_port;platform.driver.cdd_i2c;platform.driver.rte_i2c;platform.driver.pmic;platform.driver.rte_pmic;platform.driver.mcu;platform.driver.FlexCAN;platform.driver.rte_can</sdkComponents>
 	</storageModule>
 	<storageModule moduleId="com.nxp.s32ds.cle.uct.internal.core.toolchainSettings">
 		<COND_TOOLCHAIN_LIBRARIES/>
@@ -448,7 +448,7 @@
 		<COND_TOOLCHAIN_CUSTOM_OPTION/>
 	</storageModule>
 	<storageModule moduleId="com.nxp.s32ds.cle.uct.internal.core.toolchainScriptProfile">
-		<COND_TOOLCHAIN_COMPONENTS_OPTION>COPY=platform.os.freertos_heap_4;platform.driver.Platform;platform.driver.clock;platform.driver.osif;platform.driver.mcu;platform.driver.port;platform.driver.pmic;platform.middleware.ipcf_freertos;platform.middleware.ipcf_s32g3xx;platform.driver.dio;platform.middleware.ipcf;platform.os.freertosCM7;platform.driver.cdd_i2c;platform.os.freertos;platform.driver.siul2_port</COND_TOOLCHAIN_COMPONENTS_OPTION>
+		<COND_TOOLCHAIN_COMPONENTS_OPTION>COPY=platform.os.freertos_heap_4;platform.driver.Platform;platform.driver.clock;platform.driver.osif;platform.driver.mcu;platform.driver.port;platform.driver.FlexCAN;platform.driver.pmic;platform.middleware.ipcf_freertos;platform.middleware.ipcf_s32g3xx;platform.driver.dio;platform.middleware.ipcf;platform.os.freertosCM7;platform.driver.cdd_i2c;platform.os.freertos;platform.driver.siul2_port</COND_TOOLCHAIN_COMPONENTS_OPTION>
 	</storageModule>
 	<storageModule moduleId="org.eclipse.cdt.make.core.buildtargets"/>
 	<storageModule moduleId="org.eclipse.cdt.internal.ui.text.commentOwnerProjectMappings"/>
