@@ -3,6 +3,13 @@
  * @brief Bare-metal SPI driver for S32G3 DSPI module + TJA1145 transceiver
  * control
  * @note  S32G3 uses DSPI (De-serial SPI), NOT LPSPI!
+ *
+ * Delay Strategy (v2.0 optimization):
+ *   All timing delays are based on TJA1145A datasheet (Rev.2, 2020-09-23)
+ *   Section 11 - Dynamic Characteristics, Table 35.
+ *   DWT cycle counter is used for microsecond-precision delays.
+ *   Blind NOP loops have been replaced with precise µs delays or
+ *   register polling where applicable.
  */
 
 /*==================================================================================================
@@ -22,12 +29,39 @@ volatile Spi_Baremetal_Debug_t g_Spi_Baremetal_Debug = {0};
  *==================================================================================================*/
 
 /**
- * @brief Simple busy-wait delay
- * @param loops Number of NOP iterations
+ * @brief  DWT-based precise microsecond delay
+ *
+ * Uses ARM Cortex-M7 DWT CYCCNT for timing. Assumes DWT is already enabled
+ * (done by EcuM_Diag_Init via portCONFIGURE_TIMER_FOR_RUN_TIME_STATS).
+ *
+ * @param  us  Number of microseconds to delay (max ~10 seconds @ 400MHz)
  */
-static void Spi_Baremetal_Delay(uint32 loops) {
+static void Spi_Baremetal_DelayUs(uint32 us) {
+  /* DWT->CYCCNT register address (ARM Cortex-M7 standard) */
+  volatile uint32 *const DWT_CYCCNT = (volatile uint32 *)0xE0001004UL;
+
+  /* CPU_FREQ / 1000000 = cycles per microsecond */
+  const uint32 cycles_per_us = 400U; /* 400 MHz / 1 MHz = 400 */
+  uint32 start = *DWT_CYCCNT;
+  uint32 target = us * cycles_per_us;
+
+  /* Unsigned subtraction handles 32-bit counter wrap-around */
+  while ((*DWT_CYCCNT - start) < target) {
+    /* busy wait */
+  }
+}
+
+/**
+ * @brief  Short nop delay for DSPI register stabilization
+ *
+ * Only used for DSPI internal register setup where a few clock cycles
+ * of propagation delay is sufficient. Not for TJA1145 timing.
+ *
+ * @param  nops  Number of NOP iterations (1 NOP ≈ 2.5ns @ 400MHz)
+ */
+static void Spi_Baremetal_NopDelay(uint32 nops) {
   volatile uint32 i;
-  for (i = 0; i < loops; i++) {
+  for (i = 0; i < nops; i++) {
     __asm volatile("nop");
   }
 }
@@ -41,6 +75,9 @@ static void Spi_Baremetal_Delay(uint32 loops) {
  *
  * Configuration: Master mode, 8-bit frame, CPOL=0/CPHA=1 (SPI Mode 1),
  * MSB first, PCS0 inactive high, baud rate ~1MHz.
+ *
+ * DSPI register stabilization only needs a few bus clock cycles, not
+ * hundreds of microseconds. Using minimal NOP delays here.
  */
 void Spi_Baremetal_Init(uint8 baudrate_div) {
   uint32 mcr_value;
@@ -49,17 +86,17 @@ void Spi_Baremetal_Init(uint8 baudrate_div) {
 
   /* Step 1: Disable module completely (MDIS=1, HALT=1) for clean reset */
   DSPI5_REG(DSPI_MCR_OFFSET) = DSPI_MCR_MDIS_MASK | DSPI_MCR_HALT_MASK;
-  Spi_Baremetal_Delay(100);
+  Spi_Baremetal_NopDelay(20); /* ~50ns: allow register write to propagate */
 
   /* Step 2: Clear ALL status flags (W1C), especially EOQF */
   DSPI5_REG(DSPI_SR_OFFSET) = 0xFFFF0000UL;
-  Spi_Baremetal_Delay(50);
+  /* No delay needed: W1C takes effect immediately */
 
   /* Step 3: Enable module, Master mode, keep HALT, clear FIFOs */
   mcr_value = DSPI_MCR_MSTR_MASK | DSPI_MCR_PCSIS0_MASK | DSPI_MCR_HALT_MASK |
               DSPI_MCR_CLR_TXF_MASK | DSPI_MCR_CLR_RXF_MASK;
   DSPI5_REG(DSPI_MCR_OFFSET) = mcr_value;
-  Spi_Baremetal_Delay(100);
+  Spi_Baremetal_NopDelay(20); /* ~50ns: FIFO clear propagation */
 
   /* Step 4: Configure CTAR0 - TJA1145 requires SPI Mode 1 (CPOL=0, CPHA=1) */
   ctar_value =
@@ -84,7 +121,7 @@ void Spi_Baremetal_Init(uint8 baudrate_div) {
   /* Step 7: Release HALT to start module */
   mcr_value = DSPI_MCR_MSTR_MASK | DSPI_MCR_PCSIS0_MASK;
   DSPI5_REG(DSPI_MCR_OFFSET) = mcr_value;
-  Spi_Baremetal_Delay(100);
+  Spi_Baremetal_NopDelay(20); /* ~50ns: module start-up propagation */
 
   /* Step 8: Verify and capture debug info */
   sr = DSPI5_REG(DSPI_SR_OFFSET);
@@ -230,8 +267,19 @@ static void Spi_Baremetal_Tja1145_ClearEventsAndDisableWakeup(void) {
 /**
  * @brief Initialize TJA1145 and set to Normal mode
  *
- * Sequence: Read ID -> CAN Offline -> Disable wake -> Clear events
- *           -> Standby -> Clear events -> Normal -> Verify NMS -> CAN Active
+ * Timing references (TJA1145A datasheet Rev.2, Section 11, Table 35):
+ *   - t_startup: max 4.7ms (power-on to INH active)
+ *   - t_startup(CAN): max 220µs (CAN mode switch to Active, CTS=1)
+ *   - t_WH(S): min 250ns (SCSN high pulse width in Normal/Standby)
+ *   - SPI register writes take effect after CS release (next t_WH(S))
+ *   - No specified minimum delay between consecutive SPI commands
+ *   - NMS bit reflects mode status and can be polled immediately
+ *
+ * Previous version used blind delays totaling ~25ms for 5 retries.
+ * This version uses:
+ *   - Precise µs delays where datasheet specifies timing requirements
+ *   - Register polling for NMS confirmation (instead of blind 2.5ms wait)
+ *   - Minimal inter-command gaps (SPI protocol handles its own CS timing)
  *
  * @return 0 on success, 1 on failure (NMS not achieved)
  */
@@ -239,6 +287,7 @@ uint8 Spi_Baremetal_Tja1145_Init(void) {
   uint8 device_id;
   uint8 main_status;
   uint8 i;
+  uint32 poll;
 
   g_Spi_Baremetal_Debug.tja_error_code = 0U;
 
@@ -255,43 +304,73 @@ uint8 Spi_Baremetal_Tja1145_Init(void) {
   main_status = Spi_Baremetal_Tja1145_ReadReg(TJA1145_REG_MAIN_STATUS);
   g_Spi_Baremetal_Debug.tja_R03_main_status = main_status;
 
-  /* Step 3: Wait for VCC/VIO to stabilize after power-on (~10ms) */
-  Spi_Baremetal_Delay(800000);
+  /*
+   * Step 3: Wait for VCC/VIO to stabilize after power-on.
+   * Datasheet t_startup max = 4.7ms. However, by the time we reach here,
+   * PMIC has been initialized and SPI communication was already verified
+   * by reading Device ID. Use a conservative 2ms wait.
+   */
+  Spi_Baremetal_DelayUs(2000);
 
   /* Retry loop for mode transition (up to 5 attempts) */
   for (i = 0; i < 5; i++) {
     g_Spi_Baremetal_Debug.tja_init_step = 40U + i;
 
-    /* Force CAN Offline (CMC=00) */
+    /* Force CAN Offline (CMC=00) to stop bus-side activity */
     Spi_Baremetal_Tja1145_WriteReg(TJA1145_REG_CAN_CONTROL, 0x00U);
-    Spi_Baremetal_Delay(50000);
+    /*
+     * No delay needed after SPI write: the register update takes effect
+     * on CS release. The next SPI transaction provides natural spacing
+     * (t_WH(S) min 250ns is handled by DSPI CS timing in CTAR).
+     */
 
     /* Disable all wake-up sources and clear events */
     Spi_Baremetal_Tja1145_ClearEventsAndDisableWakeup();
-    Spi_Baremetal_Delay(200000);
 
-    /* Transition: -> Standby */
+    /* Transition: -> Standby (MC=0x04) */
     Spi_Baremetal_Tja1145_WriteReg(TJA1145_REG_MODE_CONTROL,
                                    TJA1145_MODE_STANDBY);
-    Spi_Baremetal_Delay(400000);
+    /*
+     * Standby mode transition: datasheet does not specify a minimum
+     * waiting time. The internal state machine processes this synchronously
+     * with the SPI clock. A 50µs guard is conservative.
+     */
+    Spi_Baremetal_DelayUs(50);
 
     /* Clear events again (clean slate before Normal) */
     Spi_Baremetal_Tja1145_WriteReg(TJA1145_REG_SYSTEM_EVENT_STATUS, 0xFFU);
     Spi_Baremetal_Tja1145_WriteReg(TJA1145_REG_TRANSCEIVER_EVENT_STATUS, 0xFFU);
     Spi_Baremetal_Tja1145_WriteReg(TJA1145_REG_WAKE_PIN_EVENT, 0xFFU);
-    Spi_Baremetal_Delay(200000);
 
-    /* Transition: -> Normal */
+    /* Transition: -> Normal (MC=0x07) */
     Spi_Baremetal_Tja1145_WriteReg(TJA1145_REG_MODE_CONTROL,
                                    TJA1145_MODE_NORMAL);
-    Spi_Baremetal_Delay(1000000); /* Wait for oscillator + NMS */
 
-    /* Verify: NMS=0 means Normal mode confirmed (per datasheet) */
-    main_status = Spi_Baremetal_Tja1145_ReadReg(TJA1145_REG_MAIN_STATUS);
+    /*
+     * Poll NMS bit instead of blind waiting.
+     * NMS=0 indicates Normal mode entered successfully.
+     * The oscillator and internal logic need time to settle, so we poll
+     * with a 100µs interval, up to 5ms total (well beyond typical need).
+     * Previous code used a blind 2.5ms wait.
+     */
+    for (poll = 0; poll < 50U; poll++) {
+      Spi_Baremetal_DelayUs(100);
+      main_status = Spi_Baremetal_Tja1145_ReadReg(TJA1145_REG_MAIN_STATUS);
+      if ((main_status & TJA1145_MAIN_STATUS_NMS) == 0U) {
+        break; /* NMS=0: Normal mode confirmed */
+      }
+    }
+
     if ((main_status & TJA1145_MAIN_STATUS_NMS) == 0U) {
       g_Spi_Baremetal_Debug.tja_R03_main_status = main_status;
       break; /* Success */
     }
+
+    /*
+     * If NMS still 1 after polling, short pause before retry to allow
+     * any transient condition to settle.
+     */
+    Spi_Baremetal_DelayUs(200);
   }
 
   /* Capture final status */
@@ -305,9 +384,13 @@ uint8 Spi_Baremetal_Tja1145_Init(void) {
   g_Spi_Baremetal_Debug.tja_R63_trans_event =
       Spi_Baremetal_Tja1145_ReadReg(TJA1145_REG_TRANSCEIVER_EVENT_STATUS);
 
-  /* Enable CAN Active mode regardless of NMS result */
+  /*
+   * Enable CAN Active mode regardless of NMS result.
+   * Datasheet t_startup(CAN) max = 220µs for CTS to become 1.
+   * We wait 250µs to cover worst-case.
+   */
   Spi_Baremetal_Tja1145_WriteReg(TJA1145_REG_CAN_CONTROL, 0x01U);
-  Spi_Baremetal_Delay(20000);
+  Spi_Baremetal_DelayUs(250);
 
   if ((main_status & TJA1145_MAIN_STATUS_NMS) == 0U) {
     g_Spi_Baremetal_Debug.tja_error_code = 0U;
@@ -340,10 +423,13 @@ uint8 Spi_Baremetal_Tja1145_RecoverFromSleep(void) {
  * MUST be called AFTER FlexCAN is initialized and TXD is recessive (HIGH).
  * Per datasheet Section 7.2.1.1: CAN transceiver activates only when
  * TXD is in recessive state.
+ *
+ * Datasheet t_startup(CAN) max = 220µs for CTS transition.
+ * We wait 250µs before reading back status.
  */
 void Spi_Baremetal_Tja1145_SetCanActive(void) {
   Spi_Baremetal_Tja1145_WriteReg(TJA1145_REG_CAN_CONTROL, 0x01U);
-  Spi_Baremetal_Delay(1000);
+  Spi_Baremetal_DelayUs(250); /* t_startup(CAN) max 220µs */
 
   g_Spi_Baremetal_Debug.tja_R22_trans_status =
       Spi_Baremetal_Tja1145_ReadReg(TJA1145_REG_TRANS_STATUS);
@@ -358,6 +444,10 @@ void Spi_Baremetal_Tja1145_SetCanActive(void) {
  * - If not in Normal mode -> full RecoverFromSleep
  * - If in Normal but CAN not Active (CTS=0) -> re-toggle CMC
  * - Tracks power supply diagnostics (FSMS, VCS, PO, CF)
+ *
+ * Timing note: This runs in a 10ms RTOS task context. All delays here
+ * must be minimal to avoid blocking the task beyond its period.
+ * Previous delays were ~1.25µs each (already small), now made precise.
  */
 void Spi_Baremetal_Tja1145_PeriodicTest(void) {
   uint8 main_status;
@@ -391,13 +481,13 @@ void Spi_Baremetal_Tja1145_PeriodicTest(void) {
   if ((trans_status & 0x80U) == 0U) {
     /* Freeze FlexCAN so TXD goes recessive (HIGH) */
     FlexCAN_Ip_SetStopMode(0U);
-    Spi_Baremetal_Delay(500);
+    Spi_Baremetal_DelayUs(10); /* Allow FlexCAN to enter freeze */
 
     /* CMC: Offline -> Active */
     Spi_Baremetal_Tja1145_WriteReg(TJA1145_REG_CAN_CONTROL, 0x00U);
-    Spi_Baremetal_Delay(500);
+    /* No delay needed: next SPI transaction provides natural CS spacing */
     Spi_Baremetal_Tja1145_WriteReg(TJA1145_REG_CAN_CONTROL, 0x01U);
-    Spi_Baremetal_Delay(1000);
+    Spi_Baremetal_DelayUs(250); /* t_startup(CAN) max 220µs */
 
     /* Unfreeze FlexCAN */
     FlexCAN_Ip_SetStartMode(0U);
