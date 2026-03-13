@@ -467,11 +467,11 @@
                   <clock_output id="ENET_LOOPBACK_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
                   <clock_output id="ERM0_CLK.outFreq" value="200/3 MHz" locked="false" accuracy=""/>
                   <clock_output id="FIRCOUT.outFreq" value="48 MHz" locked="false" accuracy=""/>
-                  <clock_output id="FLEXCAN0_CLK.outFreq" value="40 MHz" locked="false" accuracy=""/>
-                  <clock_output id="FLEXCAN1_CLK.outFreq" value="40 MHz" locked="false" accuracy=""/>
-                  <clock_output id="FLEXCAN2_CLK.outFreq" value="40 MHz" locked="false" accuracy=""/>
-                  <clock_output id="FLEXCAN3_CLK.outFreq" value="40 MHz" locked="false" accuracy=""/>
-                  <clock_output id="FLEXCAN_CLK.outFreq" value="40 MHz" locked="false" accuracy=""/>
+                  <clock_output id="FLEXCAN0_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
+                  <clock_output id="FLEXCAN1_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
+                  <clock_output id="FLEXCAN2_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
+                  <clock_output id="FLEXCAN3_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
+                  <clock_output id="FLEXCAN_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
                   <clock_output id="FLEXRAY_CLK.outFreq" value="24 MHz" locked="false" accuracy=""/>
                   <clock_output id="FLEXTIMERA_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
                   <clock_output id="FLEXTIMERB_CLK.outFreq" value="48 MHz" locked="false" accuracy=""/>
@@ -627,7 +627,6 @@
                   <setting id="MC_CGM_0_MUX_0.sel" value="COREPLL_DFS1" locked="false"/>
                   <setting id="MODULE_CLOCKS.MC_CGM_0_AUX0_MUX.sel" value="COREPLL_DFS1" locked="false"/>
                   <setting id="MODULE_CLOCKS.MC_CGM_0_AUX6_DIV0.scale" value="2" locked="true"/>
-                  <setting id="MODULE_CLOCKS.MC_CGM_0_AUX7_MUX.sel" value="FXOSC_CLK.FXOSCOUT" locked="false"/>
                   <setting id="MODULE_CLOCKS.RTC_CLK_MUX.sel" value="FIRC_CLK" locked="false"/>
                   <setting id="PERIPHPLL_DFS1.scale" value="2.5" locked="true"/>
                   <setting id="PERIPHPLL_DFS2.scale" value="4" locked="true"/>
@@ -1148,6 +1147,11 @@
             <dependency resourceType="SWComponent" resourceId="platform.driver.FlexCAN" description="工具链/IDE工程不支持FlexCAN版本。所需值: ${required_value}, 实际值: ${actual_value}. 工程可能没有被正确编译。" problem_level="1" source="Peripherals">
                <feature name="version" evaluation="equivalent">
                   <data type="Version">0.1.0</data>
+               </feature>
+            </dependency>
+            <dependency resourceType="Tool" resourceId="Clocks" description="外围设备工具需要 Clocks 工具，但它已被禁用。" problem_level="2" source="Peripherals">
+               <feature name="enabled" evaluation="equal">
+                  <data>true</data>
                </feature>
             </dependency>
          </dependencies>
@@ -4326,7 +4330,7 @@
                                     <struct name="McuCgm0ClockMux7">
                                        <setting name="Name" value="McuCgm0ClockMux7"/>
                                        <setting name="McuClockMuxUnderMcuControl" value="true"/>
-                                       <setting name="McuClkMux7_Source" value="FXOSC_CLK"/>
+                                       <setting name="McuClkMux7_Source" value="FIRC_CLK"/>
                                     </struct>
                                     <struct name="McuCgm0ClockMux8">
                                        <setting name="Name" value="McuCgm0ClockMux8"/>

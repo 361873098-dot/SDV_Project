@@ -343,7 +343,7 @@ const Clock_Ip_ClockConfigType Mcu_aClockConfigPB[1] = {
             #if CLOCK_IP_SELECTORS_NO > 7U
             {
                 FLEXCAN_CLK,                    /* Clock name associated to selector */
-                FXOSC_CLK,                    /* Name of the selected input source */
+                FIRC_CLK,                    /* Name of the selected input source */
             },
             #endif
 
@@ -1417,7 +1417,7 @@ const Clock_Ip_ClockConfigType Mcu_aClockConfigPB[1] = {
                     CMU_FC_IER_FLLAIE(0) |
                     CMU_FC_IER_FHHAIE(0)
                 ),
-                40000000U,
+                48000000U,
             },
             #endif
             #if CLOCK_IP_CMUS_NO > 10U

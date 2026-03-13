@@ -67,5 +67,18 @@ uint8 Pwsm_GetIgkStatus(void)
 	return Dio_ReadChannel(DioConf_DioChannel_IGN_KEY);
 }
 
-
+/***********************************************************************************************************************
+ *  Function name    : Pwsm_EthSwitchRst()
+ *
+ *  Description      : Write level to specified channel.
+ *
+ *  List of arguments: none
+ *
+ *  Return value     : Level: Specifies the channel desired level.
+ *
+ ***********************************************************************************************************************/
+void Pwsm_EthSwitchRst(uint8 Level)
+{
+	Dio_WriteChannel(DioConf_DioChannel_EthSwitchRst, Level);
+}
 

@@ -32,6 +32,7 @@
 #include "pwsm_cnf.h"
 #include "Dio.h"
 #include "picc_pwr_main.h"
+#include "Mcu.h"
 
 
 /***********************************************************************************************************************
@@ -68,6 +69,7 @@ static uint32 Pwsm_TestShutdownTimer = 0U;
 *  global function definitions
 ***********************************************************************************************************************/
 uint8 Igk_Status = 1;
+uint8 McuRst = 0;
 
 /***********************************************************************************************************************
  *  Function name    : Pwsm_CommEvent()
@@ -250,6 +252,8 @@ void Pwsm_Main(void)
 
 			/*Keep wake up*/
 			Pwsm_WriteWakeup(STD_HIGH);
+			/*Set Rst of Ethernet switch*/
+			Pwsm_EthSwitchRst(STD_HIGH);
 			/* Move to next step */
 			Pwsm_State = PWSM_STATE_RUN;
 		break;

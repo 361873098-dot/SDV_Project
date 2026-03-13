@@ -56,6 +56,7 @@ extern "C"{
 #define RX_TASK_STACK_SIZE          (192U)  // 768B
 #define PERIODIC_TASK_STACK_SIZE    (256U)  // 1KB
 
+
 /** Control channel configuration */
 #define CTRL_CHAN_ID            (0U)
 #define CTRL_CHAN_SIZE          (64U)

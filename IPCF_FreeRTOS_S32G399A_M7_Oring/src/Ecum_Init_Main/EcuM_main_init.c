@@ -41,6 +41,7 @@ extern "C" {
 /* FreeRTOS headers (for diagnostics) */
 #include "FreeRTOS.h"
 #include "task.h"
+#include "Mcu.h"
 
 #include <string.h>
 
@@ -414,8 +415,10 @@ int main(void) {
 
   /* CPU load stress-test (only active when ECUM_CPULOAD_TEST_ENABLE == 1) */
   EcuM_CpuLoadTest_Init();
+  /* Initialize the Mcu driver */
+   Mcu_Init(NULL_PTR);
 
-  Clock_Ip_Init(&Mcu_aClockConfigPB[0]);
+
 
   /* Platform initialization */
   Platform_Init(NULL_PTR);
