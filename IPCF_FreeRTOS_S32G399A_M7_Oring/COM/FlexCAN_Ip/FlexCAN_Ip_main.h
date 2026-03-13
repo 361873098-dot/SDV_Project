@@ -28,7 +28,7 @@ extern "C" {
 /**
  * @brief Diagnostic update period in milliseconds
  *
- * Controls how often AINFC_CAN_Period_10ms_Task() is called from the 10ms periodic task.
+ * Controls how often EcuM_Diag_Update() is called from the 10ms periodic task.
  * Change this value to adjust the update frequency:
  *	 1000U = 1 second (default)
  *	 2000U = 2 seconds
@@ -112,12 +112,12 @@ unsigned char AINFC_Can_RxMsgL(unsigned char Bus_ID, unsigned char Mbx,
                                unsigned char *msg_frame);
 
 /**
- * @brief 10ms periodic CAN processing
+ * @brief 10ms periodic CAN processing (Runnable)
  *
  * Handles 2 TX and 2 RX message cyclic processing.
- * 
+ * Called from TASK_M0_10MS() in Ostask_main.c.
  */
-void AINFC_CAN_Main_task(void);
+void AINFC_Can_Cyclic_10ms(void);
 
 #ifdef __cplusplus
 }

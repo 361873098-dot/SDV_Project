@@ -33,9 +33,23 @@ extern "C"{
  *==================================================================================================*/
 
 /**
- * @brief Prepare and start main task
+ * @brief PICC Pre-OS Initialization
+ *
+ * Initializes IPCF driver, PICC channels/services/links, and power management.
+ * Called from main() before vTaskStartScheduler().
+ * Does NOT depend on the RTOS scheduler being active.
  */
-void PICC_Mian_Task(void);
+void PICC_PreOS_Init(void);
+
+/**
+ * @brief RX message processing task (event-driven, queue blocking)
+ *
+ * This task blocks on the RX queue waiting for IPCF messages.
+ * Created by OsTask_Creation_All() in Ostask_main.c.
+ *
+ * @param[in] params  FreeRTOS task parameter (unused)
+ */
+void App_Rx_Msg_10ms_Task(void *params);
 
 /**
  * @brief Error handling function
@@ -50,4 +64,4 @@ void handle_error(sint8 error, const char *file, int line);
 }
 #endif
 
-#endif /* MAIN_H */
+#endif /* PICC_MAIN_H */

@@ -4,6 +4,12 @@
  *
  * Unified initialization management following AUTOSAR EcuM pattern.
  * Implements the hybrid architecture with PreOS/PostOS separation.
+ *
+ * Boot sequence:
+ *   main()
+ *   ├── PreOS: Hardware driver initialization (Clock, GPIO, SPI, I2C, PMIC)
+ *   ├── PreOS: Communication initialization (FlexCAN, TJA1145, IPCF/PICC)
+ *   └── PostOS: OsTask_Creation_All() → vTaskStartScheduler()
  */
 
 #ifdef __cplusplus
@@ -38,7 +44,7 @@ extern "C" {
 #include "TJA1145A_Spi_Baremetal.h"
 #include "picc_main.h"
 
-/* FreeRTOS headers (for diagnostics) */
+/* FreeRTOS headers */
 #include "FreeRTOS.h"
 #include "task.h"
 #include "Mcu.h"
@@ -46,29 +52,39 @@ extern "C" {
 #include <string.h>
 #include "System_Cpuload.h"
 
+/* Centralized task management */
 #include "Ostask_main.h"
 
 /** FlexCAN instance */
 #define FLEXCAN_INST 0U
 
 /*==================================================================================================
- *										   main()
+ *                                         main()
  * Entry
  *==================================================================================================*/
 
 /**
  * @brief Application entry point
+ *
+ * Executes initialization in strict order:
+ *   Phase 1 (PreOS): Hardware drivers — no RTOS dependency
+ *   Phase 2 (PreOS): Communication middleware — creates IPCF softirq task
+ *                     (valid before scheduler) and registers callbacks
+ *   Phase 3 (PostOS): Creates application tasks and starts scheduler
  */
 int main(void) {
+  /* ==================================================================
+   * Phase 1: PreOS — Hardware & Driver Initialization
+   * ================================================================== */
+
   /* Initialize diagnostic subsystem (must be first, before any RTOS call) */
   EcuM_Diag_Init();
 
   /* CPU load stress-test (only active when ECUM_CPULOAD_TEST_ENABLE == 1) */
   EcuM_CpuLoadTest_Init();
+
   /* Initialize the Mcu driver */
-   Mcu_Init(NULL_PTR);
-
-
+  Mcu_Init(NULL_PTR);
 
   /* Platform initialization */
   Platform_Init(NULL_PTR);
@@ -76,33 +92,55 @@ int main(void) {
   /* Initialize pins */
   Port_Init(NULL_PTR);
 
- // Siul2_Port_Ip_Init(NUM_OF_CONFIGURED_PINS, g_pin_mux_InitConfigArr);
-
   /* Initialize I2c driver */
   I2c_Init(NULL_PTR);
 
+  /* Initialize PMIC */
   Pmic_driver_init();
 
+  /* Enable SPI5 clock for TJA1145 */
   Clock_Ip_EnableModuleClock(SPI5_CLK);
 
+  /* Initialize SPI bare-metal driver */
   Spi_Baremetal_Init(2U); /* Prescaler = 2 for ~1MHz SPI clock */
 
+  /* Initialize TJA1145 CAN transceiver */
   Spi_Baremetal_Tja1145_Init();
 
+  /* Initialize FlexCAN driver */
   FlexCAN_Ip_Init(FLEXCAN_INST, &FlexCAN_State0, &FlexCAN_Config0);
-
   FlexCAN_Ip_SetStartMode(FLEXCAN_INST);
 
+  /* Configure FlexCAN Message Buffers (TX/RX) */
   FlexCAN_Process_Init();
 
+  /* Activate TJA1145 CAN mode */
   Spi_Baremetal_Tja1145_SetCanActive();
 
-  AINFC_CAN_Main_task();
+  /* ==================================================================
+   * Phase 2: PreOS — Communication Middleware Initialization
+   *
+   * PICC_PreOS_Init() performs:
+   *   - Creates RX queue (xQueueCreate — valid before scheduler)
+   *   - Initializes IPCF driver (ipc_shm_init internally creates
+   *     softirq task via xTaskCreate — valid before scheduler)
+   *   - Initializes PICC channels, services, and link
+   *   - Initializes power management module
+   *   - Registers callbacks
+   * ================================================================== */
+  PICC_PreOS_Init();
 
-  /* Start main task */
-  PICC_Mian_Task();
+  /* ==================================================================
+   * Phase 3: PostOS — Create Tasks & Start Scheduler
+   *
+   * OsTask_Creation_All() creates:
+   *   - OS_10ms    (priority 2): Unified periodic task
+   *   - App_Rx_Msg (priority 3): IPCF RX queue processing
+   * Then calls vTaskStartScheduler() — does NOT return.
+   * ================================================================== */
+  OsTask_Creation_All();
 
-  /* Main loop (normally won't reach here - scheduler takes over) */
+  /* Main loop (should never reach here - scheduler takes over) */
   for (;;) {
     /* Idle loop */
   }

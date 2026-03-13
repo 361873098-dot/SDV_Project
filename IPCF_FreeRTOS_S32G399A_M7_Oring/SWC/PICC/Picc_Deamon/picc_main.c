@@ -35,27 +35,15 @@ extern "C"{
 
 /* PICC module */
 #include "picc_api.h"
-#include "picc_stack.h"     /* For PICC_StackProcess */
-#include "picc_heartbeat.h" /* For PICC_HeartbeatProcess */
-#include "picc_link.h"      /* For PICC_LinkProcess */
+#include "picc_stack.h"     /* For PICC_STACK_MAX_SIZE, PICC_ProcessRxData */
 
-/* Power management module */
+/* Power management configuration (for PWR_PROVIDER_ID, PWR_CONSUMER_ID, etc.) */
 #include "picc_pwr_main.h"
 #include "picc_pwr_cnf.h"
-#include "pwsm.h"
 #include "Port.h"
 /*==================================================================================================
  *                                         Macro Definitions
  *==================================================================================================*/
-
-/** Main task stack size (512 words = 2KB) */
-#define MAIN_TASK_STACK_SIZE    (512U)
-
-
-#define PICC_INIT_TASK_STACK_SIZE   (256U)  // 1KB
-#define RX_TASK_STACK_SIZE          (192U)  // 768B
-#define PERIODIC_TASK_STACK_SIZE    (256U)  // 1KB
-
 
 /** Control channel configuration */
 #define CTRL_CHAN_ID            (0U)
@@ -111,17 +99,11 @@ static QueueHandle_t g_rxQueue = NULL;
 /** Exit code (for main loop) */
 volatile uint8 exit_code;
 
-uint32 task_M7_0_10ms_cnt = 0;
-
-
 /*==================================================================================================
  *                                         FreeRTOS Static Memory
  *==================================================================================================*/
 
 #if (configSUPPORT_STATIC_ALLOCATION == 1)
-
-static StackType_t xStack[MAIN_TASK_STACK_SIZE];
-static StaticTask_t xTaskBuffer;
 
 static StaticTask_t xIdleTaskTCB;
 static StackType_t uxIdleTaskStack[configMINIMAL_STACK_SIZE];
@@ -235,26 +217,25 @@ void ctrl_chan_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *mem)
 }
 
 /*==================================================================================================
- *                                         Initialization Task
+ *                                         PreOS Initialization
  *==================================================================================================*/
 
 /**
- * @brief PICC Initialization Task
+ * @brief PICC Pre-OS Initialization (called from main() before vTaskStartScheduler)
  * 
  * Performs all one-time initialization:
- * - IPCF driver init
+ * - IPCF driver init (internally creates softirq task)
  * - PICC channel/service/link init
  * - Power management init
  * 
- * Deletes itself after initialization completes.
- * Periodic tasks are handled by App_Main_10ms_Task.
+ * @note This function does NOT depend on the RTOS scheduler being active.
+ *       All FreeRTOS API calls used here (xQueueCreate, xTaskCreate inside
+ *       ipc_shm_init) are valid before vTaskStartScheduler().
  */
-static void PICC_Init_Task(void *params)
+void PICC_PreOS_Init(void)
 {
     sint8 err = -IPC_SHM_E_INVAL;
     PICC_InitConfig_t piccCfg;
-
-    (void)params;
 
     /* ========================================================================
      * 1. Initialize receive queue
@@ -344,24 +325,23 @@ static void PICC_Init_Task(void *params)
      * 8. Register Link state callback
      * ======================================================================== */
     (void)PICC_RegisterLinkStateCallback(App_LinkStateCallback);
-
-    /* ========================================================================
-     * Initialization complete - delete this task
-     * ======================================================================== */
-    vTaskDelete(NULL);
 }
 
 /*==================================================================================================
- *                                         Main 10ms Task
+ *                                         RX Message Task (Event-Driven)
  *==================================================================================================*/
 
 /**
- * @brief Main 10ms periodic task
+ * @brief RX message processing task (event-driven, queue blocking)
  * 
  * Handles received messages from IPCF.
  * This task blocks on the RX queue waiting for messages.
+ * 
+ * @note This task MUST remain as an independent FreeRTOS task because it uses
+ *       xQueueReceive with portMAX_DELAY (infinite blocking).
+ *       It is created by OsTask_Creation_All() in Ostask_main.c.
  */
-static void App_Rx_Msg_10ms_Task(void *params)
+void App_Rx_Msg_10ms_Task(void *params)
 {
     App_RxMsg_t rxMsg;
     sint8 err;
@@ -410,151 +390,6 @@ void handle_error(sint8 error, const char *file, int line)
     while (1) { }
     */
 }
-
-
-/***********************************************************************************************************************
- *  Function name    : task_M7_0_10ms()
- *
- *  Description      : Periodic task on core M7_0 (10ms period)
- *                     Handles PICC communication and power state machine.
- *
- *  List of arguments: none
- *
- *  Return value     : none
- *
- ***********************************************************************************************************************/
-void task_M7_0_10ms( void *pvParameters )
-{
-    TickType_t xLastWakeTime;
-    const TickType_t xPeriod = pdMS_TO_TICKS(10);  /* 10ms period */
-    
-    (void)pvParameters;
-    
-    /* Initialize the xLastWakeTime variable with current time */
-    xLastWakeTime = xTaskGetTickCount();
-
-    for(;;)
-    {
-        task_M7_0_10ms_cnt++;
-
-        /* PICC Stack: Send buffered messages on all channels */
-        PICC_StackProcess();
-
-        /* PICC Heartbeat: Send Ping every 2000ms */
-        PICC_HeartbeatProcess();
-
-        /* PICC Link: Handle connection requests (Client mode) */
-        PICC_LinkProcess();
-
-        /* Power State Machine */
-        Pwsm_Main();
-
-        /* [FIX] Wait until next 10ms period - allows lower priority tasks to run */
-        vTaskDelayUntil(&xLastWakeTime, xPeriod);
-    }
-}
-
-
-/*==================================================================================================
- *                                         Initialization Entry
- *==================================================================================================*/
-
-/**
- * @brief Prepare and start tasks
- * 
- * Creates the following tasks:
- * - PICC_Init_Task: One-time initialization (priority 4, deletes itself)
- * - App_Main_10ms_Task: RX message processing (priority 1)
- * - task_M7_0_10ms: PICC periodic + Power state machine (priority 2)
- */
-void PICC_Mian_Task(void)
-{
-#if (configSUPPORT_DYNAMIC_ALLOCATION == 1)
-    BaseType_t os_status;
-
-    /* Create initialization task (high priority, runs once then deletes itself) */
-    os_status = xTaskCreate((TaskFunction_t)PICC_Init_Task,
-                "PICC_Init_Task",
-                PICC_INIT_TASK_STACK_SIZE,
-                NULL,
-                tskIDLE_PRIORITY + 4,  /* High priority for init */
-                NULL);
-    if (os_status != pdPASS) {
-        HANDLE_ERROR((sint8)os_status);
-    }
-
-    /* Create main RX processing task
-     * [FIX] Priority 3 (higher than task_M7_0_10ms priority 2)
-     * Ensures messages are processed before state machine checks flags
-     * This fixes the race condition where Method ID=8 arrived but flag not yet set
-     */
-    os_status = xTaskCreate((TaskFunction_t)App_Rx_Msg_10ms_Task,
-                "App_Main_10ms",
-                RX_TASK_STACK_SIZE,
-                NULL,
-                tskIDLE_PRIORITY + 3,
-                NULL);
-    if (os_status != pdPASS) {
-        HANDLE_ERROR((sint8)os_status);
-    }
-
-    /* Create power state machine task */
-    os_status = xTaskCreate((TaskFunction_t)task_M7_0_10ms,
-                "task_M7_0_10ms",
-                PERIODIC_TASK_STACK_SIZE,
-                NULL,
-                tskIDLE_PRIORITY + 2,
-                NULL);
-    if (os_status != pdPASS) {
-        HANDLE_ERROR((sint8)os_status);
-    }
-
-#endif
-
-#if (configSUPPORT_STATIC_ALLOCATION == 1)
-    xTaskCreateStatic((TaskFunction_t)PICC_Init_Task,
-                "PICC_Init_Task",
-                MAIN_TASK_STACK_SIZE,
-                NULL,
-                tskIDLE_PRIORITY + 4,
-                xStack,
-                &xTaskBuffer);
-#endif
-
-    vTaskStartScheduler();
-}
-
-/*==================================================================================================
- *                                         FreeRTOS Hooks
- *==================================================================================================*/
-
-void vApplicationMallocFailedHook(void)
-{
-    taskDISABLE_INTERRUPTS();
-    while (1) {
-        /* block indefinitely */
-    }
-}
-
-void vApplicationStackOverflowHook(TaskHandle_t pxTask, char *pcTaskName)
-{
-    (void)pcTaskName;
-    (void)pxTask;
-
-    taskDISABLE_INTERRUPTS();
-    while (1) {
-        /* block indefinitely */
-    }
-}
-
-/*==================================================================================================
- *                                         main() Entry
- *==================================================================================================*/
-
-/**
- * @brief Application entry point
- */
-
 
 #if defined(__cplusplus)
 }
