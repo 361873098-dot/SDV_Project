@@ -11,7 +11,7 @@
  *   Var.Set g_cpuLoadTestPercent = 50   --> burns 50% CPU
  */
 
-#include "EcuM_CpuLoadTest.h"
+#include "System_CpuLoadTest.h"
 
 #if (ECUM_CPULOAD_TEST_ENABLE == 1U)
 

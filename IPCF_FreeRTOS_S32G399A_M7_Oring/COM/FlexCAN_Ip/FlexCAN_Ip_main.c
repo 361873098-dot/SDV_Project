@@ -20,17 +20,18 @@ extern "C" {
  *                                         MACRO DEFINITIONS
  *==================================================================================================*/
 
-#define ECUM_PERIODIC_TASK_STACK_SIZE (256U) /* 1KB */
+#define FLEXCAN_TASK_STACK_SIZE (256U) /* 1KB */
 
 /*==================================================================================================
  *                                         INCLUDE FILES
  *==================================================================================================*/
 
 #include "FlexCAN_Ip_main.h"
-#include "EcuM_main_init.h" /* For EcuM_Diag_Update() */
 #include "FlexCAN_Ip.h"
 #include "Mcal.h"
 #include "TJA1145A_Spi_Baremetal.h"
+
+#include "System_Cpuload.h"
 
 #include <string.h>
 
@@ -303,7 +304,7 @@ void AINFC_CAN_Period_10ms_Task(void *pvParameters) {
     /* ====================================================================
      * RTOS Diagnostics Update (period: ECUM_DIAG_UPDATE_PERIOD_MS)
      * ==================================================================== */
-    if ((EcuM_Period_10ms_cnt % (ECUM_DIAG_UPDATE_PERIOD_MS / 10U)) == 0U) {
+    if ((EcuM_Period_10ms_cnt % (AINFC_UPDATE_PERIOD_MS / 10U)) == 0U) {
       EcuM_Diag_Update();
     }
 
@@ -323,7 +324,7 @@ void AINFC_CAN_Main_task(void) {
    * Priority 2 - runs after RX task processes messages
    * ======================================================================== */
   os_status = xTaskCreate((TaskFunction_t)AINFC_CAN_Period_10ms_Task,
-                          "ANIFC_CAN_10ms", ECUM_PERIODIC_TASK_STACK_SIZE, NULL,
+                          "ANIFC_CAN_10ms", FLEXCAN_TASK_STACK_SIZE, NULL,
                           tskIDLE_PRIORITY + 2, NULL);
   if (os_status != pdPASS) {
     while (1) {

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file EcuM_main_init.c
  * @brief EcuM Initialization Module Implementation
  *
@@ -17,7 +17,7 @@ extern "C" {
 /* EcuM module headers */
 
 #include "EcuM_main_init.h"
-#include "EcuM_CpuLoadTest.h"
+#include "System_CpuLoadTest.h"
 
 /* RTD Drivers Headers */
 #include "CDD_I2c.h"
@@ -44,7 +44,12 @@ extern "C" {
 #include "Mcu.h"
 
 #include <string.h>
+#include "System_Cpuload.h"
 
+#include "Ostask_main.h"
+
+/** FlexCAN instance */
+#define FLEXCAN_INST 0U
 
 /*==================================================================================================
  *										   main()

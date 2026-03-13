@@ -24,6 +24,21 @@ extern "C" {
  *                                         MACRO DEFINITIONS
  *==================================================================================================*/
 
+
+/**
+ * @brief Diagnostic update period in milliseconds
+ *
+ * Controls how often AINFC_CAN_Period_10ms_Task() is called from the 10ms periodic task.
+ * Change this value to adjust the update frequency:
+ *	 1000U = 1 second (default)
+ *	 2000U = 2 seconds
+ *	 5000U = 5 seconds
+ *
+ * @note Must be a multiple of 10 (10ms task base period)
+ */
+#define AINFC_UPDATE_PERIOD_MS (1000U)
+
+
 /** AINFC CAN return codes */
 #define AINFC_CAN_OK 0U     /**< Operation successful */
 #define AINFC_CAN_BUSY 1U   /**< MB is busy (previous TX/RX not complete) */
