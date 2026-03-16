@@ -1,0 +1,230 @@
+; ==========================================================================
+; diag_can_deep_analysis.cmm
+; Deep analysis of FlexCAN TX failure root cause
+; Focus: ESR1 errors, CTRL1 config, MB0/MB1 CS codes, and driver state
+; ==========================================================================
+
+AREA.CREATE FlexCAN_Deep
+AREA.SELECT FlexCAN_Deep
+AREA.CLEAR FlexCAN_Deep
+AREA.view FlexCAN_Deep
+
+; FlexCAN0 base address
+&can_base=0x401B4000
+
+; --- Read all critical registers ---
+&mcr=DATA.LONG(D:&can_base+0x00)
+&ctrl1=DATA.LONG(D:&can_base+0x04)
+&ecr=DATA.LONG(D:&can_base+0x1C)
+&esr1=DATA.LONG(D:&can_base+0x20)
+&imask1=DATA.LONG(D:&can_base+0x28)
+&iflag1=DATA.LONG(D:&can_base+0x30)
+&ctrl2=DATA.LONG(D:&can_base+0x34)
+&esr2=DATA.LONG(D:&can_base+0x38)
+
+; --- Read MB0 (TX MB0) CS word ---
+; MB RAM starts at offset 0x80, each MB is 16 bytes (4 words)
+; MB0 = offset 0x80
+&mb0_cs=DATA.LONG(D:&can_base+0x80)
+&mb0_id=DATA.LONG(D:&can_base+0x84)
+
+; --- Read MB1 (TX MB1) CS word ---
+; MB1 = offset 0x90
+&mb1_cs=DATA.LONG(D:&can_base+0x90)
+&mb1_id=DATA.LONG(D:&can_base+0x94)
+
+; --- Read MB2 (RX MB0) CS word ---
+; MB2 = offset 0xA0
+&mb2_cs=DATA.LONG(D:&can_base+0xA0)
+&mb2_id=DATA.LONG(D:&can_base+0xA4)
+
+; --- Read MB3 (RX MB1) CS word ---
+; MB3 = offset 0xB0
+&mb3_cs=DATA.LONG(D:&can_base+0xB0)
+&mb3_id=DATA.LONG(D:&can_base+0xB4)
+
+; --- Read driver state variables ---
+&txBusy0=VAR.VALUE(g_txBusy[0])
+&txBusy1=VAR.VALUE(g_txBusy[1])
+&txCount0=VAR.VALUE(g_canTxCount)
+&txCount1=VAR.VALUE(g_canTxCount2)
+&rxCount0=VAR.VALUE(g_canRxCount)
+&rxCount1=VAR.VALUE(g_canRxCount2)
+
+; --- Read FlexCAN driver internal state ---
+&mb0_state=VAR.VALUE(FlexCAN_State0.mbs[0].state)
+&mb1_state=VAR.VALUE(FlexCAN_State0.mbs[1].state)
+&mb2_state=VAR.VALUE(FlexCAN_State0.mbs[2].state)
+&mb3_state=VAR.VALUE(FlexCAN_State0.mbs[3].state)
+
+; --- Decode MB CODE fields ---
+&mb0_code=((&mb0_cs>>24.)&0xF)
+&mb1_code=((&mb1_cs>>24.)&0xF)
+&mb2_code=((&mb2_cs>>24.)&0xF)
+&mb3_code=((&mb3_cs>>24.)&0xF)
+
+; --- Decode CTRL1 bit timing ---
+&presdiv=((&ctrl1>>24.)&0xFF)
+&rjw=((&ctrl1>>22.)&0x3)
+&pseg1=((&ctrl1>>19.)&0x7)
+&pseg2=((&ctrl1>>16.)&0x7)
+&propseg=(&ctrl1&0x7)
+&lom=((&ctrl1>>3.)&0x1)
+&boffrec=((&ctrl1>>6.)&0x1)
+&lpb=((&ctrl1>>12.)&0x1)
+
+; Bit time = 1 + (PROPSEG+1) + (PSEG1+1) + (PSEG2+1)
+&tq_per_bit=(1.+(&propseg+1.)+(&pseg1+1.)+(&pseg2+1.))
+
+; --- Decode ESR1 errors ---
+&errint=(&esr1&0x2)>>1.
+&boffint=(&esr1&0x4)>>2.
+&rx_active=(&esr1&0x8)>>3.
+&fltconf=(&esr1&0x30)>>4.
+&tx_active=(&esr1&0x40)>>6.
+&idle=(&esr1&0x80)>>7.
+&rxwrn=(&esr1&0x100)>>8.
+&txwrn=(&esr1&0x200)>>9.
+&stferr=(&esr1&0x400)>>10.
+&frmerr=(&esr1&0x800)>>11.
+&crcerr=(&esr1&0x1000)>>12.
+&ackerr=(&esr1&0x2000)>>13.
+&bit0err=(&esr1&0x4000)>>14.
+&bit1err=(&esr1&0x8000)>>15.
+&rwrnint=(&esr1&0x10000)>>16.
+&twrnint=(&esr1&0x20000)>>17.
+&synch=(&esr1&0x40000)>>18.
+&boffdoneint=(&esr1&0x80000)>>19.
+&errovr=(&esr1&0x200000)>>21.
+
+; --- Decode ECR ---
+&tx_err_cnt=(&ecr&0xFF)
+&rx_err_cnt=((&ecr>>8.)&0xFF)
+
+; --- Decode MCR ---
+&maxmb=(&mcr&0x7F)
+&mdis=(&mcr>>31.)&1
+&frz_en=(&mcr>>30.)&1
+&rfen=(&mcr>>29.)&1
+&halt=(&mcr>>28.)&1
+&notrdy=(&mcr>>27.)&1
+&frzack=(&mcr>>24.)&1
+&srxdis=(&mcr>>17.)&1
+&irmq=(&mcr>>16.)&1
+
+PRINT "=========================================================="
+PRINT " FlexCAN0 Deep Analysis - CAN TX Failure Root Cause"
+PRINT "=========================================================="
+PRINT ""
+PRINT "[1] RAW REGISTER VALUES:"
+PRINT "    MCR   = 0x" &mcr
+PRINT "    CTRL1 = 0x" &ctrl1
+PRINT "    ECR   = 0x" &ecr
+PRINT "    ESR1  = 0x" &esr1
+PRINT "    ESR2  = 0x" &esr2
+PRINT "    CTRL2 = 0x" &ctrl2
+PRINT "    IMASK1= 0x" &imask1
+PRINT "    IFLAG1= 0x" &iflag1
+PRINT ""
+PRINT "[2] MCR DECODE:"
+PRINT "    MDIS     = " &mdis " (0=enabled, 1=disabled)"
+PRINT "    FRZ      = " &frz_en
+PRINT "    HALT     = " &halt
+PRINT "    NOTRDY   = " &notrdy
+PRINT "    FRZACK   = " &frzack
+PRINT "    SRXDIS   = " &srxdis
+PRINT "    IRMQ     = " &irmq
+PRINT "    MAXMB    = " &maxmb
+PRINT ""
+PRINT "[3] CTRL1 - BIT TIMING:"
+PRINT "    PRESDIV  = " &presdiv " (divider = " (&presdiv+1.) ")"
+PRINT "    RJW      = " &rjw " (RJW = " (&rjw+1.) ")"
+PRINT "    PSEG1    = " &pseg1 " (Phase Seg1 = " (&pseg1+1.) ")"
+PRINT "    PSEG2    = " &pseg2 " (Phase Seg2 = " (&pseg2+1.) ")"
+PRINT "    PROPSEG  = " &propseg " (Prop Seg = " (&propseg+1.) ")"
+PRINT "    TQ/bit   = " &tq_per_bit
+PRINT "    LOM      = " &lom " (Listen-Only Mode)"
+PRINT "    BOFFREC  = " &boffrec " (Bus-Off Recovery: 0=auto,1=disabled)"
+PRINT "    LPB      = " &lpb " (Loop-Back Mode)"
+PRINT ""
+PRINT "[4] ESR1 - ERROR STATUS DECODE:"
+PRINT "    ERRINT   = " &errint " (Error Interrupt)"
+PRINT "    BOFFINT  = " &boffint " (Bus-Off Interrupt)"
+PRINT "    RX       = " &rx_active " (Receiving)"
+PRINT "    TX       = " &tx_active " (Transmitting)"
+PRINT "    IDLE     = " &idle " (CAN Bus Idle)"
+PRINT "    SYNCH    = " &synch " (Synchronized to bus)"
+PRINT "    FLTCONF  = " &fltconf " (0=ErrorActive,1=ErrorPassive,2/3=BusOff)"
+PRINT "    ---"
+PRINT "    RXWRN    = " &rxwrn " (RX Error Warning)"
+PRINT "    TXWRN    = " &txwrn " (TX Error Warning)"
+PRINT "    STFERR   = " &stferr " (Stuff Error)"
+PRINT "    FRMERR   = " &frmerr " (Form Error)"
+PRINT "    CRCERR   = " &crcerr " (CRC Error)"
+PRINT "    ACKERR   = " &ackerr " (*** ACK Error ***)"
+PRINT "    BIT0ERR  = " &bit0err " (Bit0 Error)"
+PRINT "    BIT1ERR  = " &bit1err " (Bit1 Error)"
+PRINT "    TWRNINT  = " &twrnint " (TX Warning Interrupt)"
+PRINT "    RWRNINT  = " &rwrnint " (RX Warning Interrupt)"
+PRINT "    ERROVR   = " &errovr " (Error Overrun)"
+PRINT "    BOFFDONE = " &boffdoneint " (Bus-Off Recovery Done)"
+PRINT ""
+PRINT "[5] ECR - ERROR COUNTERS:"
+PRINT "    TX Error Count = " &tx_err_cnt
+PRINT "    RX Error Count = " &rx_err_cnt
+PRINT ""
+PRINT "[6] MESSAGE BUFFER STATUS:"
+PRINT "    MB0 (TX0): CS=0x" &mb0_cs " CODE=0x" &mb0_code " ID=0x" &mb0_id
+PRINT "    MB1 (TX1): CS=0x" &mb1_cs " CODE=0x" &mb1_code " ID=0x" &mb1_id
+PRINT "    MB2 (RX0): CS=0x" &mb2_cs " CODE=0x" &mb2_code " ID=0x" &mb2_id
+PRINT "    MB3 (RX1): CS=0x" &mb3_cs " CODE=0x" &mb3_code " ID=0x" &mb3_id
+PRINT "    ---"
+PRINT "    MB CODE meaning (TX): 0x8=Inactive, 0x9=Abort, 0xC=TX Data"
+PRINT "    MB CODE meaning (RX): 0x0=Inactive, 0x2=Full, 0x4=Empty"
+PRINT ""
+PRINT "[7] DRIVER STATE:"
+PRINT "    g_txBusy[0]  = " &txBusy0
+PRINT "    g_txBusy[1]  = " &txBusy1
+PRINT "    g_canTxCount = " &txCount0
+PRINT "    g_canTxCount2= " &txCount1
+PRINT "    g_canRxCount = " &rxCount0
+PRINT "    g_canRxCount2= " &rxCount1
+PRINT ""
+PRINT "[8] FlexCAN_State0 MB states:"
+PRINT "    mbs[0].state = " &mb0_state " (0=IDLE, 1=RX_BUSY, 2=TX_BUSY, 3=RX_RANSWER)"
+PRINT "    mbs[1].state = " &mb1_state
+PRINT "    mbs[2].state = " &mb2_state
+PRINT "    mbs[3].state = " &mb3_state
+PRINT ""
+PRINT "=========================================================="
+PRINT " DIAGNOSIS SUMMARY"
+PRINT "=========================================================="
+
+IF &ackerr==1
+(
+  PRINT "  >>> ACK ERROR detected! <<<"
+  PRINT "      No other CAN node acknowledged the transmitted frame."
+  PRINT "      Possible causes:"
+  PRINT "      1. No other CAN node on the bus"
+  PRINT "      2. Baud rate mismatch with other nodes"
+  PRINT "      3. CAN bus not properly terminated (missing 120ohm)"
+  PRINT "      4. CAN_H / CAN_L wiring problem"
+  PRINT "      5. TJA1145 transceiver not in Normal CAN mode"
+)
+
+IF &fltconf==1
+(
+  PRINT "  >>> Error Passive state <<<"
+  PRINT "      FlexCAN has accumulated >=128 errors"
+)
+
+IF &fltconf>=2
+(
+  PRINT "  >>> BUS OFF state! <<<"
+  PRINT "      FlexCAN is in Bus-Off, no TX/RX possible"
+)
+
+PRINT ""
+PRINT "=========================================================="
+
+ENDDO
