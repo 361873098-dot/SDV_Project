@@ -1,0 +1,55 @@
+; ==============================================================================
+; diag_flexcan_status.cmm
+; Diagnose: Check FlexCAN TX/RX counters and controller status
+; ==============================================================================
+
+AREA.Create DIAG
+AREA.Select DIAG
+AREA.Clear DIAG
+
+Break
+
+PRINT "=========================================="
+PRINT " FlexCAN Status Diagnostics"
+PRINT "=========================================="
+PRINT ""
+
+PRINT "[1] CAN TX/RX Counters:"
+PRINT "    g_canTxCount  = " Var.VALUE(g_canTxCount)
+PRINT "    g_canTxCount2 = " Var.VALUE(g_canTxCount2)
+PRINT "    g_canRxCount  = " Var.VALUE(g_canRxCount)
+PRINT "    g_canRxCount2 = " Var.VALUE(g_canRxCount2)
+PRINT ""
+
+PRINT "[2] TX Busy Flags:"
+PRINT "    g_txBusy[0] = " Var.VALUE(g_txBusy[0])
+PRINT "    g_txBusy[1] = " Var.VALUE(g_txBusy[1])
+PRINT ""
+
+PRINT "[3] RX Configured Flags:"
+PRINT "    g_rxConfigured[0] = " Var.VALUE(g_rxConfigured[0])
+PRINT "    g_rxConfigured[1] = " Var.VALUE(g_rxConfigured[1])
+PRINT ""
+
+PRINT "[4] FlexCAN0 Registers (base 0x401B4000):"
+; MCR
+PRINT "    MCR  = " Data.Long(AXI:0x401B4000)
+; ESR1 (Error and Status Register 1)
+PRINT "    ESR1 = " Data.Long(AXI:0x401B4020)
+; ECR (Error Counter Register)
+PRINT "    ECR  = " Data.Long(AXI:0x401B4024)
+; IMASK1
+PRINT "    IMASK1 = " Data.Long(AXI:0x401B4028)
+; IFLAG1
+PRINT "    IFLAG1 = " Data.Long(AXI:0x401B4030)
+PRINT ""
+
+PRINT "[5] Task counter (sanity check):"
+PRINT "    g_OsTask_10ms_cnt = " Var.VALUE(g_OsTask_10ms_cnt)
+PRINT ""
+
+PRINT "=========================================="
+
+AREA.view DIAG
+
+ENDDO

@@ -54,6 +54,9 @@ extern "C"{
  *                                         MACRO DEFINITIONS
  *==================================================================================================*/
 
+/** Unified 1ms periodic task stack size (Words) */
+#define OSTASK_1MS_STACK_SIZE       (128U)  /* 512B */
+
 /** Unified 10ms periodic task stack size (Words) */
 #define OSTASK_10MS_STACK_SIZE      (256U)  /* 1KB */
 
@@ -65,7 +68,20 @@ extern "C"{
  *==================================================================================================*/
 
 /** 10ms task execution counter (for sub-period dispatch and debugging) */
+
+static uint32 g_OsTask_1ms_cnt=0;
+static uint32 g_OsTask_2ms_cnt=0;
+static uint32 g_OsTask_5ms_cnt=0;
+
 static uint32 g_OsTask_10ms_cnt = 0U;
+static uint32 g_OsTask_20ms_cnt = 0U;
+
+static uint32 g_OsTask_50ms_cnt = 0U;
+static uint32 g_OsTask_100ms_cnt = 0U;
+static uint32 g_OsTask_1000ms_cnt = 0U;
+
+
+
 
 /*==================================================================================================
  *                                  PERIODIC RUNNABLE FUNCTIONS
@@ -81,6 +97,7 @@ static uint32 g_OsTask_10ms_cnt = 0U;
  */
 void TASK_M0_1MS(void)
 {
+	g_OsTask_1ms_cnt++;
 
 }
 
@@ -90,6 +107,7 @@ void TASK_M0_1MS(void)
  */
 void TASK_M0_2MS(void)
 {
+	g_OsTask_2ms_cnt++;
 
 }
 
@@ -99,6 +117,7 @@ void TASK_M0_2MS(void)
  */
 void TASK_M0_5MS(void)
 {
+	g_OsTask_5ms_cnt++;
 
 }
 
@@ -132,6 +151,7 @@ void TASK_M0_10MS(void)
  */
 void TASK_M0_20MS(void)
 {
+	g_OsTask_20ms_cnt++;
 
 }
 
@@ -142,6 +162,7 @@ void TASK_M0_20MS(void)
  */
 void TASK_M0_50MS(void)
 {
+	g_OsTask_50ms_cnt++;
 
 }
 
@@ -152,6 +173,8 @@ void TASK_M0_50MS(void)
  */
 void TASK_M0_100MS(void)
 {
+	g_OsTask_100ms_cnt++;
+
     /* TJA1145 SPI periodic test (for SPI waveform debugging) */
     Spi_Baremetal_Tja1145_PeriodicTest();
 }
@@ -163,6 +186,8 @@ void TASK_M0_100MS(void)
  */
 void TASK_M0_1000MS(void)
 {
+	g_OsTask_1000ms_cnt++;
+
     /* RTOS diagnostics update (CPU load, stack watermark, heap) */
     EcuM_Diag_Update();
 }
@@ -175,7 +200,44 @@ void TASK_M0_1000MS(void)
  *==================================================================================================*/
 
 /**
+ * @brief Unified 1ms periodic thread
+ *
+ * Drives sub-10ms period groups: 1ms, 2ms, 5ms
+ */
+static void OsTask_1ms_Thread(void *pvParameters)
+{
+    TickType_t xLastWakeTime;
+    const TickType_t xPeriod = pdMS_TO_TICKS(1);
+    static uint32 s_1ms_cnt = 0U;
+
+    (void)pvParameters;
+
+    xLastWakeTime = xTaskGetTickCount();
+
+    for (;;)
+    {
+        s_1ms_cnt++;
+
+        /* ---- Base 1ms ---- */
+        TASK_M0_1MS();
+
+        /* ---- Sub-period dispatch ---- */
+        if ((s_1ms_cnt % 2U) == 0U) {
+            TASK_M0_2MS();
+        }
+        if ((s_1ms_cnt % 5U) == 0U) {
+            TASK_M0_5MS();
+        }
+
+        /* Wait until next 1ms period */
+        vTaskDelayUntil(&xLastWakeTime, xPeriod);
+    }
+}
+
+/**
  * @brief Unified 10ms periodic thread
+ *
+ * Drives 10ms and longer period groups: 10ms, 20ms, 50ms, 100ms, 1000ms
  */
 static void OsTask_10ms_Thread(void *pvParameters)
 {
@@ -184,7 +246,6 @@ static void OsTask_10ms_Thread(void *pvParameters)
 
     (void)pvParameters;
 
-    /* Initialize the xLastWakeTime variable with current time */
     xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
@@ -236,7 +297,22 @@ void OsTask_Creation_All(void)
     BaseType_t os_status;
 
     /* ========================================================================
-     * 1. Unified 10ms periodic task
+     * 1. Unified 1ms periodic task
+     *    Drives: 1ms, 2ms, 5ms period groups
+     * ======================================================================== */
+    os_status = xTaskCreate(OsTask_1ms_Thread,
+                            "OS_1ms",
+                            OSTASK_1MS_STACK_SIZE,
+                            NULL,
+                            tskIDLE_PRIORITY + 2,
+                            NULL);
+    if (os_status != pdPASS) {
+        taskDISABLE_INTERRUPTS();
+        while (1) { /* Task creation failed */ }
+    }
+
+    /* ========================================================================
+     * 2. Unified 10ms periodic task
      *    Drives: CAN, PICC, TJA1145, PowerSM, Diagnostics
      * ======================================================================== */
     os_status = xTaskCreate(OsTask_10ms_Thread,
@@ -251,7 +327,7 @@ void OsTask_Creation_All(void)
     }
 
     /* ========================================================================
-     * 2. PICC RX message processing task (event-driven, queue blocking)
+     * 3. PICC RX message processing task (event-driven, queue blocking)
      *    Blocks on xQueueReceive(portMAX_DELAY) - must be independent task
      * ======================================================================== */
     os_status = xTaskCreate((TaskFunction_t)App_Rx_Msg_10ms_Task,

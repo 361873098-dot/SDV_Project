@@ -1,0 +1,31 @@
+; ==============================================================================
+; diag_where_stuck.cmm
+; Diagnose: Find where main() initialization is stuck
+; NOTE: Must BREAK the core first (press Break/Esc in Trace32)
+; ==============================================================================
+
+AREA.Create DIAG
+AREA.Select DIAG
+AREA.Clear DIAG
+
+; Stop the core first
+Break
+
+PRINT "=========================================="
+PRINT " Where is main() stuck?"
+PRINT "=========================================="
+PRINT ""
+PRINT "[1] Current Function:"
+PRINT "    " sYmbol.Name(D:Register(PC))
+PRINT ""
+PRINT "[2] LR (caller):"
+PRINT "    " sYmbol.Name(D:Register(LR))
+PRINT ""
+PRINT "[3] Scheduler running:"
+PRINT "    " Var.VALUE(xSchedulerRunning)
+PRINT ""
+PRINT "=========================================="
+
+AREA.view DIAG
+
+ENDDO

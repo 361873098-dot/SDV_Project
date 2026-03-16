@@ -1,0 +1,68 @@
+; ==============================================================================
+; diag_ostask_counters.cmm
+; Diagnose: Check all OsTask counters and scheduler state
+; ==============================================================================
+
+AREA.Create DIAG
+AREA.Select DIAG
+AREA.Clear DIAG
+
+PRINT "=========================================="
+PRINT " OsTask Counter Diagnostics"
+PRINT "=========================================="
+PRINT ""
+
+; 1. Check if scheduler is running
+PRINT "[1] Scheduler State:"
+IF Var.VALUE(xSchedulerRunning)==1
+(
+    PRINT "    xSchedulerRunning = 1  (Scheduler IS running)"
+)
+ELSE
+(
+    PRINT "    xSchedulerRunning = " Var.VALUE(xSchedulerRunning) "  *** Scheduler NOT running! ***"
+)
+PRINT ""
+
+; 2. Check all OsTask counters
+PRINT "[2] OsTask Counters (should increment if called):"
+PRINT "    g_OsTask_1ms_cnt    = " Var.VALUE(g_OsTask_1ms_cnt)
+PRINT "    g_OsTask_2ms_cnt    = " Var.VALUE(g_OsTask_2ms_cnt)
+PRINT "    g_OsTask_5ms_cnt    = " Var.VALUE(g_OsTask_5ms_cnt)
+PRINT "    g_OsTask_10ms_cnt   = " Var.VALUE(g_OsTask_10ms_cnt)
+PRINT "    g_OsTask_20ms_cnt   = " Var.VALUE(g_OsTask_20ms_cnt)
+PRINT "    g_OsTask_50ms_cnt   = " Var.VALUE(g_OsTask_50ms_cnt)
+PRINT "    g_OsTask_100ms_cnt  = " Var.VALUE(g_OsTask_100ms_cnt)
+PRINT "    g_OsTask_1000ms_cnt = " Var.VALUE(g_OsTask_1000ms_cnt)
+PRINT ""
+
+; 3. Check tick count (basic RTOS heartbeat)
+PRINT "[3] FreeRTOS Tick Count:"
+PRINT "    xTickCount = " Var.VALUE(xTickCount)
+PRINT ""
+
+; 4. Check current task
+PRINT "[4] Current Task:"
+PRINT "    pxCurrentTCB->pcTaskName = " Var.STRing(pxCurrentTCB->pcTaskName)
+PRINT ""
+
+; 5. Check number of tasks
+PRINT "[5] Number of Tasks:"
+PRINT "    uxCurrentNumberOfTasks = " Var.VALUE(uxCurrentNumberOfTasks)
+PRINT ""
+
+; 6. Check diagnostics
+PRINT "[6] EcuM Diagnostics:"
+PRINT "    g_ecuMDiag.updateCount   = " Var.VALUE(g_ecuMDiag.updateCount)
+PRINT "    g_ecuMDiag.uptimeSeconds = " Var.VALUE(g_ecuMDiag.uptimeSeconds)
+PRINT ""
+
+PRINT "=========================================="
+PRINT " Key: If g_OsTask_10ms_cnt = 0 and"
+PRINT "      xTickCount > 0, then OsTask_10ms_Thread"
+PRINT "      was never created or never started."
+PRINT "=========================================="
+
+AREA.view DIAG
+
+ENDDO

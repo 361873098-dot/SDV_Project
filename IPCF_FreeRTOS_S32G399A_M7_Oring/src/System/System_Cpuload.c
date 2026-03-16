@@ -139,6 +139,11 @@ void EcuM_Diag_Init(void) {
   volatile uint8 *p;
   uint32 i;
 
+  /* Enable DWT cycle counter FIRST - required by Spi_Baremetal_DelayUs()
+   * which runs before the scheduler calls portCONFIGURE_TIMER_FOR_RUN_TIME_STATS.
+   * Safe to call multiple times (FreeRTOS will call it again at scheduler start). */
+  vMainConfigureTimerForRunTimeStats();
+
   /* Zero g_ecuMDiag: volatile-safe, compiler CANNOT optimize this away */
   p = (volatile uint8 *)&g_ecuMDiag;
   for (i = 0U; i < sizeof(g_ecuMDiag); i++) {
