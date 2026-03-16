@@ -92,7 +92,7 @@ int main(void) {
   /* Initialize pins */
   Port_Init(NULL_PTR);
 
-  Siul2_Port_Ip_Init(NUM_OF_CONFIGURED_PINS, g_pin_mux_InitConfigArr);
+  //Siul2_Port_Ip_Init(NUM_OF_CONFIGURED_PINS, g_pin_mux_InitConfigArr);
 
   /* Initialize I2c driver */
   I2c_Init(NULL_PTR);
