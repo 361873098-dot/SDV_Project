@@ -52,7 +52,7 @@
 									<listOptionValue builtIn="false" value="/IPCF_FreeRTOS_S32G399A_M7_Oring/src"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/SWC/PICC}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/SWC/PICC/Picc_APP}&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/SWC/PICC/Picc_APP/Pwsm}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/SWC/PICC/Pwsm}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/SWC/PICC/Picc_Deamon}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${ProjDirPath}/generate/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${ProjDirPath}/RTD/include&quot;"/>
