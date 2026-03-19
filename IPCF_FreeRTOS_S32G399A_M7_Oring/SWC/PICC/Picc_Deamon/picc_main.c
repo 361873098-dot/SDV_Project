@@ -37,9 +37,6 @@ extern "C"{
 #include "picc_api.h"
 #include "picc_stack.h"     /* For PICC_STACK_MAX_SIZE, PICC_ProcessRxData */
 
-/* Power management configuration (for PWR_PROVIDER_ID, PWR_CONSUMER_ID, etc.) */
-#include "picc_pwr_main.h"
-#include "picc_pwr_cnf.h"
 #include "Port.h"
 /*==================================================================================================
  *                                         Macro Definitions
@@ -137,28 +134,6 @@ void vApplicationGetTimerTaskMemory(StaticTask_t **ppxTimerTaskTCBBuffer,
 #endif /* configSUPPORT_STATIC_ALLOCATION */
 
 /*==================================================================================================
- *                                         PICC Callback Functions
- *==================================================================================================*/
-
-/**
- * @brief Connection state change callback
- */
-static void App_LinkStateCallback(uint8 remoteId, PICC_LinkState_e state)
-{
-    (void)remoteId;
-    
-    if (state == PICC_LINK_STATE_CONNECTED) {
-        /* Connected */
-    } else if (state == PICC_LINK_STATE_DISCONNECTED) {
-        /* Disconnected */
-    } else {
-        /* Connecting */
-    }
-    
-    g_appData.link_state = (uint8)state;
-}
-
-/*==================================================================================================
  *                                         IPCF Callback Functions
  *==================================================================================================*/
 
@@ -240,7 +215,6 @@ void PICC_data_unmng_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void 
 void PICC_PreOS_Init(void)
 {
     sint8 err = -IPC_SHM_E_INVAL;
-    PICC_InitConfig_t piccCfg;
 
     /* ========================================================================
      * 1. Initialize receive queue
@@ -272,7 +246,6 @@ void PICC_PreOS_Init(void)
         HANDLE_ERROR(err);
     }
 
-    /* Remove blocking wait, allow program to continue */
     if (ipc_shm_is_remote_ready(IPCF_INSTANCE0) != 0) {
         /* Remote not ready, but don't block */
     }
@@ -284,7 +257,12 @@ void PICC_PreOS_Init(void)
     }
 
     /* ========================================================================
-     * 4. Initialize IPCF channels (Stack + Heartbeat) - CHANNEL LAYER
+     * 4. Initialize PICC infrastructure (trace, service layer, stack callback)
+     * ======================================================================== */
+    PICC_InfraInit();
+
+    /* ========================================================================
+     * 5. Initialize IPCF channels (Stack + Heartbeat)
      * [R6] Heartbeat starts immediately, independent of connection state
      * ======================================================================== */
     err = PICC_InitChannel(IPCF_INSTANCE0, 1U);
@@ -298,38 +276,11 @@ void PICC_PreOS_Init(void)
     }
 
     /* ========================================================================
-     * 5. Initialize PICC application infrastructure (Service Layer)
+     * NOTE: Application-specific initialization (PICC_Init per app) is now
+     *       performed by each application's own Xxx_Init() function,
+     *       e.g. Pwsm_Init() calls PICC_Init(PICC_APP_PWR, &cfg).
+     *       This is called from Ostask_main.c after PICC_PreOS_Init().
      * ======================================================================== */
-    piccCfg.linkLocalId  = PWR_PROVIDER_ID;
-    piccCfg.linkRemoteId = PWR_CONSUMER_ID;
-    piccCfg.linkRole     = PICC_ROLE_SERVER;
-    piccCfg.channelId    = PWR_CHANNEL_ID;
-
-    err = PICC_Init(&piccCfg);
-    if (err != 0) {
-        HANDLE_ERROR(err);
-    }
-
-    /* ========================================================================
-     * 6. Register application-level Link (Power Management)
-     * ======================================================================== */
-    err = PICC_LinkRegister(&piccCfg);
-    if (err != 0) {
-        HANDLE_ERROR(err);
-    }
-
-    /* ========================================================================
-     * 7. Initialize power management module
-     * ======================================================================== */
-    err = Pwr_Init();
-    if (err != 0) {
-        HANDLE_ERROR(err);
-    }
-
-    /* ========================================================================
-     * 8. Register Link state callback
-     * ======================================================================== */
-    (void)PICC_RegisterLinkStateCallback(App_LinkStateCallback);
 }
 
 /*==================================================================================================

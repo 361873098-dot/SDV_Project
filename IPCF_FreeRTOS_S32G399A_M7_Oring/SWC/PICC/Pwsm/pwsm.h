@@ -37,8 +37,7 @@
 extern "C"{
 #endif
 
-
-
+void Pwsm_Init(void);
 void Pwsm_Main(void);
 
 

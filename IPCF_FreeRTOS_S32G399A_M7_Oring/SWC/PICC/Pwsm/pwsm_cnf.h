@@ -40,9 +40,57 @@ extern "C"{
 
 #include "Platform.h"
 
+/***********************************************************************************************************************
+*  Power Management ID Configuration (migrated from picc_pwr_cnf.h)
+***********************************************************************************************************************/
+
+/** IPCF data channel ID for power management */
+#define PWR_CHANNEL_ID              (2U)
+
+/** M-Core power master Provider ID */
+#define PWR_PROVIDER_ID             (1U)
+
+/** A-Core power middleware Consumer ID */
+#define PWR_CONSUMER_ID             (6U)
+
+/** A-Core identifier (for Payload) */
+#define PWR_CORE_A                  (3U)
+
+/** Event IDs */
+#define PWR_EVENT_STATE_NOTIFY      (1U)    /**< Power state notification */
+#define PWR_EVENT_CTRL_CMD          (4U)    /**< Power control command */
+
+/** Method IDs */
+#define PWR_METHOD_STATE_ACK        (2U)    /**< State acknowledgement */
+#define PWR_METHOD_EVENT_DONE       (8U)    /**< Phase 1 completion */
+#define PWR_METHOD_CTRL_ACK         (11U)   /**< Control command ack */
+
+/**
+ * @brief Power state (Event ID=1 Payload value)
+ */
+typedef enum {
+    PWR_STATE_RUN        = 2U,
+    PWR_STATE_STANDBY    = 4U,
+    PWR_STATE_RESET      = 5U
+} Power_State_e;
+
+/**
+ * @brief Power control command (Event ID=4 Payload value)
+ */
+typedef enum {
+    PWR_CMD_SHUTDOWN          = 2U,
+    PWR_CMD_HARDWARE_SHUTDOWN = 3U
+} Power_Cmd_e;
+
+/**
+ * @brief Power event completion type (Method ID=8 Payload value)
+ */
+typedef enum {
+    PWR_DONE_FIRST_STEP  = 3U
+} Power_DoneType_e;
 
 /***********************************************************************************************************************
-*  local constants (CONST) and enumerations (ENUM)
+*  PWSM State Machine and Constants
 ***********************************************************************************************************************/
 
 

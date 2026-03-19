@@ -1,8 +1,17 @@
 /**
  * @file picc_api.h
- * @brief M-Core Inter-Core Communication Application Interface Layer - API Definition
+ * @brief PICC Driver Public API — Application Layer Interface
  *
- * Provides unified interface for upper layer APP calls, decoupling data from IPCF middleware.
+ * This is the ONLY header file that application layers (Pwsm, OTA, etc.) should include.
+ * It exposes exactly 8 public functions:
+ *   - PICC_Init()          : Register an application
+ *   - PICC_SendEvent()     : Send Event notification (M->A)  [declared in picc_service.h]
+ *   - PICC_MethodRequest() : Send Method request, Client (M->A)
+ *   - PICC_MethodResponse(): Send Method response, Server (M->A)
+ *   - PICC_GetMethodData() : Get received Method request data (A->M)
+ *   - PICC_GetResponseData(): Get received Method response data (A->M)
+ *   - PICC_GetEventData()  : Get received Event data (A->M)
+ *   - PICC_GetLinkState()  : Query link connection state
  *
  * Copyright 2024 NXP
  * All Rights Reserved.
@@ -15,134 +24,105 @@
 extern "C" {
 #endif
 
-#include "picc_service.h"
-#include "picc_link.h"
+#include "picc_service.h"   /* PICC_SendEvent, PICC_EventCallback_t, PICC_MethodCallback_t */
+#include "picc_link.h"      /* PICC_LinkState_e, PICC_LinkStateCallback_t */
 
 /*==================================================================================================
- *                                         Macro Definitions
+ *                                         Error Codes
  *==================================================================================================*/
 
-/** PICC error codes */
 #define PICC_E_OK               (0)
 #define PICC_E_NOT_INIT         (-1)
 #define PICC_E_PARAM            (-2)
 #define PICC_E_NOMEM            (-3)
 #define PICC_E_SEND             (-4)
 #define PICC_E_NOT_CONNECTED    (-5)
+#define PICC_E_NO_DATA          (-6)   /**< No new data available */
 
 /*==================================================================================================
- *                                         Structure Definitions
+ *                                         Application Index Enum
  *==================================================================================================*/
 
 /**
- * @brief PICC infrastructure initialization configuration
- * 
- * PICC only initializes Link layer (connection handshake/heartbeat) and Stack layer (message stacking/CRC).
- * Each service module (power management/health management etc.) registers independently via PICC_Register*Handler().
+ * @brief Application index for PICC_Init()
+ *
+ * Used as direct array index (O(1) lookup).
+ */
+typedef enum {
+    PICC_APP_PWR      = 0U,   /**< Power Management    (ProviderID: 0x01) */
+    PICC_APP_OTA      = 1U,   /**< OTA                 (ProviderID: 0x11) */
+    PICC_APP_HEALTH   = 2U,   /**< Health Management   (ProviderID: 0x21) */
+    PICC_APP_COMM     = 3U,   /**< Communication Mgmt  (ProviderID: 0x31) */
+    PICC_APP_STORAGE  = 4U,   /**< Storage Module      (ProviderID: 0x41) */
+    PICC_APP_DIAG     = 5U,   /**< Diagnostic Module   (ProviderID: 0x51) */
+    PICC_APP_TIMESYNC = 6U,   /**< Time Synchronization(ProviderID: 0x61) */
+    PICC_APP_SOA      = 7U,   /**< SOA Module          (ProviderID: 0x71) */
+    PICC_APP_RSV0     = 8U,   /**< Reserved 0 */
+    PICC_APP_RSV1     = 9U,   /**< Reserved 1 */
+    PICC_APP_MAX      = 10U   /**< Max count (array size) */
+} PICC_AppIndex_e;
+
+/*==================================================================================================
+ *                                         Application Configuration
+ *==================================================================================================*/
+
+/**
+ * @brief Per-application PICC configuration
+ *
+ * Passed to PICC_Init() to register one application.
+ * All internal registrations (Link, Method handler, Event handler) are
+ * performed automatically inside PICC_Init().
+ *
+ * If methodHandler/eventHandler is NULL, the driver still stores received
+ * data in its internal mailbox. The application can later retrieve data
+ * using PICC_GetMethodData() / PICC_GetEventData().
  */
 typedef struct {
-    /* Link layer configuration - connection handshake/heartbeat */
-    uint8        linkLocalId;     /**< Link layer local ID (CLIENT is ConsumerID, SERVER is ProviderID) */
-    uint8        linkRemoteId;    /**< Link layer remote ID (CLIENT is ProviderID, SERVER is ConsumerID) */
-    PICC_Role_e  linkRole;        /**< Link layer role */
-    
-    /* IPCF channel configuration */
-    uint8        channelId;       /**< Primary IPCF channel ID */
-} PICC_InitConfig_t;
-
-/** PICC global configuration (accessible by other modules) */
-extern PICC_InitConfig_t g_piccConfig;
+    uint8                    localId;           /**< Local ID (ProviderID for Server, ConsumerID for Client) */
+    uint8                    remoteId;          /**< Remote ID */
+    PICC_Role_e              role;              /**< PICC_ROLE_SERVER or PICC_ROLE_CLIENT */
+    uint8                    channelId;         /**< IPCF channel ID (1 or 2) */
+    PICC_LinkStateCallback_t linkStateCallback; /**< Link state callback (can be NULL) */
+    PICC_MethodCallback_t    methodHandler;     /**< Method handler (can be NULL, use polling) */
+    PICC_EventCallback_t     eventHandler;      /**< Event handler (can be NULL, use polling) */
+} PICC_AppConfig_t;
 
 /*==================================================================================================
- *                                         Function Declarations
+ *                              Public API — Initialization (1 function)
  *==================================================================================================*/
 
 /**
- * @brief Initialize PICC module
- * 
- * @param[in] config Initialization configuration
- * @return 0 on success, non-zero on failure
+ * @brief Register one application with the PICC driver
+ *
+ * Performs all internal registrations (Link, Method handler, Event handler,
+ * Link state callback). The application layer only needs to call this once
+ * during its own Xxx_Init().
+ *
+ * PICC_PreOS_Init() must have been called first.
+ *
+ * @param[in] appIndex  Application index (PICC_AppIndex_e)
+ * @param[in] config    Application configuration and callback pointers
+ * @return PICC_E_OK on success, negative on failure
  */
-sint8 PICC_Init(const PICC_InitConfig_t *config);
+sint8 PICC_Init(PICC_AppIndex_e appIndex, const PICC_AppConfig_t *config);
+
+/*==================================================================================================
+ *                              Public API — Sending M->A (3 functions)
+ *==================================================================================================*/
+
+/* PICC_SendEvent() is declared in picc_service.h (included above) */
 
 /**
- * @brief Deinitialize PICC module
- */
-void PICC_Deinit(void);
-
-/**
- * @brief Check if PICC module is initialized
- * 
- * @return TRUE if initialized, FALSE otherwise
- */
-boolean PICC_IsInitialized(void);
-
-/**
- * @brief Start connection (Client mode)
- * 
- * Manually trigger connection request sending. Usually not needed as PICC_Init() auto starts based on role:
- * - CLIENT role: Auto enters CONNECTING state and periodically sends connection requests
- * - SERVER role: Stays in passive listening state
- * 
- * @note Can be used for manual reconnection or to override auto-start behavior
- * @return 0 on success (request sent), non-zero on failure
- */
-sint8 PICC_StartConnect(void);
-
-/**
- * @brief Add additional communication channel (DEPRECATED - use PICC_InitChannel instead)
- * 
- * After PICC_Init initializes primary channel, call this to add extra channels.
- * 
- * @deprecated Use PICC_InitChannel() for clearer API
- * @param[in] instanceId IPCF instance ID (usually IPCF_INSTANCE0)
- * @param[in] channelId  IPCF channel ID
- * @return 0 on success, non-zero on failure
- */
-sint8 PICC_AddChannel(uint8 instanceId, uint8 channelId);
-
-/**
- * @brief Initialize specified IPCF channel (Stack + Heartbeat)
- * 
- * Channel-level initialization. Heartbeat starts immediately and is
- * independent of application-level connection state.
- * 
- * Example:
- *   PICC_Init();                          // Base infrastructure
- *   PICC_InitChannel(IPCF_INSTANCE0, 1U); // Channel 1 (heartbeat starts)
- *   PICC_InitChannel(IPCF_INSTANCE0, 2U); // Channel 2 (heartbeat starts)
- *   PICC_LinkRegister(...);               // Application link registration
- * 
- * @param[in] instanceId IPCF instance ID (usually IPCF_INSTANCE0)
- * @param[in] channelId  IPCF channel ID (1 or 2)
- * @return 0 on success, non-zero on failure
- */
-sint8 PICC_InitChannel(uint8 instanceId, uint8 channelId);
-
-/**
- * @brief Register application-level Link configuration
- * 
- * Uses the same config structure as PICC_Init for convenience.
- * Each application can register its own Link configuration.
- * 
- * @param[in] config Same configuration structure as PICC_Init
- * @return 0 on success, non-zero on failure
- */
-sint8 PICC_LinkRegister(const PICC_InitConfig_t *config);
-
-/* Event sending: use PICC_SendEvent(providerId, eventId, ...) from picc_service.h */
-
-/**
- * @brief Send Method request (Client role)
- * 
- * @param[in] providerId Service provider ID
- * @param[in] methodId   Method ID (0x01-0xFE)
+ * @brief Send Method request (Client role, M->A)
+ *
+ * @param[in] providerId Target provider ID
+ * @param[in] methodId   Method ID
  * @param[in] data       Request data
  * @param[in] len        Data length
  * @param[in] type       Method type @see PICC_MethodType_e
- * @param[in] instanceId IPCF instance ID (usually IPCF_INSTANCE0)
- * @param[in] channelId  IPCF channel ID (0-2 based on current config)
- * @return Session ID (>0), returns 0 on failure
+ * @param[in] instanceId IPCF instance ID
+ * @param[in] channelId  IPCF channel ID
+ * @return Session ID (>0) on success, 0 on failure
  */
 uint8 PICC_MethodRequest(uint8 providerId, uint8 methodId,
                          const uint8 *data, uint16 len,
@@ -150,60 +130,90 @@ uint8 PICC_MethodRequest(uint8 providerId, uint8 methodId,
                          uint8 instanceId, uint8 channelId);
 
 /**
- * @brief Send Method response (Server role)
- * 
+ * @brief Send Method response (Server role, M->A)
+ *
  * @param[in] consumerId Requester ID
  * @param[in] methodId   Method ID
- * @param[in] sessionId  Session ID
+ * @param[in] sessionId  Session ID (from request)
  * @param[in] returnCode Return code
  * @param[in] data       Response data
  * @param[in] len        Data length
- * @param[in] instanceId IPCF instance ID (should match request source)
- * @param[in] channelId  IPCF channel ID (should match request source)
- * @return 0 on success, non-zero on failure
+ * @param[in] instanceId IPCF instance ID
+ * @param[in] channelId  IPCF channel ID
+ * @return PICC_E_OK on success, negative on failure
  */
 sint8 PICC_MethodResponse(uint8 consumerId, uint8 methodId,
                           uint8 sessionId, uint8 returnCode,
                           const uint8 *data, uint16 len,
                           uint8 instanceId, uint8 channelId);
 
-/* ========================================================================
- * Event/Method Handler Registration
- * ========================================================================
- * New architecture: Each service module directly calls registration APIs in picc_service.h:
- * - PICC_RegisterEventHandler(providerId, callback)
- * - PICC_RegisterMethodHandler(localProviderId, callback)
- * - PICC_RegisterResponseHandler(callback)
- */
+/*==================================================================================================
+ *                              Public API — Receiving A->M (3 functions)
+ *==================================================================================================*/
 
 /**
- * @brief Register connection state change callback
- * 
- * @param[in] callback Callback function
- * @return 0 on success
+ * @brief Get A-core Method request data (Server role receives A-core request)
+ *
+ * Checks internally whether new data is available.
+ * If available, copies data to buffer and clears the ready flag.
+ *
+ * @param[in]  appIndex   Application index
+ * @param[in]  methodId   Method ID to check
+ * @param[out] data       Buffer to receive data
+ * @param[in]  maxLen     Buffer max length
+ * @param[out] actualLen  Actual data length received
+ * @return PICC_E_OK      = new data retrieved (flag cleared)
+ *         PICC_E_NO_DATA = no new data
+ *         PICC_E_PARAM   = invalid parameters
  */
-sint8 PICC_RegisterLinkStateCallback(PICC_LinkStateCallback_t callback);
+sint8 PICC_GetMethodData(PICC_AppIndex_e appIndex, uint8 methodId,
+                         uint8 *data, uint16 maxLen, uint16 *actualLen);
 
 /**
- * @brief Get connection state for specified channel
- * 
+ * @brief Get A-core Method response data (Client role receives A-core reply)
+ *
+ * After sending PICC_MethodRequest(), poll this to get the A-core response.
+ *
+ * @param[in]  appIndex    Application index
+ * @param[in]  methodId    Method ID
+ * @param[out] returnCode  A-core return code (PICC_RET_OK etc.)
+ * @param[out] data        Buffer to receive response data
+ * @param[in]  maxLen      Buffer max length
+ * @param[out] actualLen   Actual data length
+ * @return PICC_E_OK       = new response retrieved
+ *         PICC_E_NO_DATA  = no response yet
+ *         PICC_E_PARAM    = invalid parameters
+ */
+sint8 PICC_GetResponseData(PICC_AppIndex_e appIndex, uint8 methodId,
+                           uint8 *returnCode,
+                           uint8 *data, uint16 maxLen, uint16 *actualLen);
+
+/**
+ * @brief Get A-core Event notification data
+ *
+ * @param[in]  appIndex    Application index
+ * @param[in]  eventId     Event ID to check
+ * @param[out] data        Buffer to receive event data
+ * @param[in]  maxLen      Buffer max length
+ * @param[out] actualLen   Actual data length
+ * @return PICC_E_OK       = new event retrieved
+ *         PICC_E_NO_DATA  = no new event
+ *         PICC_E_PARAM    = invalid parameters
+ */
+sint8 PICC_GetEventData(PICC_AppIndex_e appIndex, uint8 eventId,
+                        uint8 *data, uint16 maxLen, uint16 *actualLen);
+
+/*==================================================================================================
+ *                              Public API — Status Query (1 function)
+ *==================================================================================================*/
+
+/**
+ * @brief Get link connection state for specified channel
+ *
  * @param[in] channelId IPCF channel ID
  * @return Connection state @see PICC_LinkState_e
  */
 PICC_LinkState_e PICC_GetLinkState(uint8 channelId);
-
-/**
- * @brief Process received IPCF message
- * 
- * Called by data_chan_rx_cb in sample.c, completes protocol parsing and message dispatching.
- * 
- * @param[in] instance  IPCF instance ID
- * @param[in] chan_id   Receive channel ID (IPCF channel)
- * @param[in] buf       Receive buffer
- * @param[in] size      Receive data length
- * @return 0 on success, non-zero on failure
- */
-sint8 PICC_ProcessRxData(const uint8 instance, uint8 chan_id, const void *buf, uint32 size);
 
 #if defined(__cplusplus)
 }
