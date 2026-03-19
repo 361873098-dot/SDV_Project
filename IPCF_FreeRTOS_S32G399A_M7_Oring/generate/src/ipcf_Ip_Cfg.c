@@ -101,8 +101,8 @@ static struct ipc_shm_channel_cfg ipcf_shm_cfg_channels0[3] = {
 		.ch = {
 			.unmanaged = {
 				.size = 64,
-				.rx_cb = ctrl_chan_rx_cb,
-				.cb_arg = &rx_cb_arg,
+				.rx_cb = PICC_data_unmng_rx_cb,
+				.cb_arg = &rx_unmg_cb_arg,
 			},
 		},
 	},
@@ -112,8 +112,8 @@ static struct ipc_shm_channel_cfg ipcf_shm_cfg_channels0[3] = {
 			.managed = {
 				.num_pools = 3,
 				.pools = ipcf_shm_cfg_buf_pools0_1,
-				.rx_cb = data_chan_rx_cb,
-				.cb_arg = &rx_cb_arg,
+				.rx_cb = PICC_data_mng_rx_cb,
+				.cb_arg = &rx_mng_cb_arg,
 			},
 		},
 	},
@@ -123,8 +123,8 @@ static struct ipc_shm_channel_cfg ipcf_shm_cfg_channels0[3] = {
 			.managed = {
 				.num_pools = 3,
 				.pools = ipcf_shm_cfg_buf_pools0_2,
-				.rx_cb = data_chan_rx_cb,
-				.cb_arg = &rx_cb_arg,
+				.rx_cb = PICC_data_mng_rx_cb,
+				.cb_arg = &rx_mng_cb_arg,
 			},
 		},
 	},

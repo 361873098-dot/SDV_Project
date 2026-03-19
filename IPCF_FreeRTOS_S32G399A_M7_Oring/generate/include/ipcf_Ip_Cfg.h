@@ -37,10 +37,11 @@ extern "C"{
 /* callbacks for channels  - must be implemented by application*/
 /* arguments for callbacks - must be implemented by application*/
 
-void ctrl_chan_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *mem);
-void data_chan_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *buf, uint32 size);
+void PICC_data_unmng_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *mem);
+void PICC_data_mng_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *buf, uint32 size);
 
-extern const void* rx_cb_arg;
+extern const void* rx_unmg_cb_arg;
+extern const void* rx_mng_cb_arg;
 
 /* ipc shm configuration for all instances */
 extern struct ipc_shm_instances_cfg ipcf_shm_instances_cfg;

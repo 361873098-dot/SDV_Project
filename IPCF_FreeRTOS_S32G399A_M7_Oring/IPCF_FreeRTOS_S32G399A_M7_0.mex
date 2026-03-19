@@ -1321,15 +1321,15 @@
                                  <struct name="0">
                                     <setting name="ipcf_channel_type" value="IPC_SHM_UNMANAGED"/>
                                     <setting name="unmanagedSize" value="64"/>
-                                    <setting name="rx_cb" value="ctrl_chan_rx_cb"/>
-                                    <setting name="rx_cb_arg" value="rx_cb_arg"/>
+                                    <setting name="rx_cb" value="PICC_data_unmng_rx_cb"/>
+                                    <setting name="rx_cb_arg" value="rx_unmg_cb_arg"/>
                                     <array name="ipcf_pools_t_array"/>
                                  </struct>
                                  <struct name="1">
                                     <setting name="ipcf_channel_type" value="IPC_SHM_MANAGED"/>
                                     <setting name="unmanagedSize" value="64"/>
-                                    <setting name="rx_cb" value="data_chan_rx_cb"/>
-                                    <setting name="rx_cb_arg" value="rx_cb_arg"/>
+                                    <setting name="rx_cb" value="PICC_data_mng_rx_cb"/>
+                                    <setting name="rx_cb_arg" value="rx_mng_cb_arg"/>
                                     <array name="ipcf_pools_t_array">
                                        <struct name="0">
                                           <setting name="num_bufs" value="30"/>
@@ -1348,8 +1348,8 @@
                                  <struct name="2">
                                     <setting name="ipcf_channel_type" value="IPC_SHM_MANAGED"/>
                                     <setting name="unmanagedSize" value="64"/>
-                                    <setting name="rx_cb" value="data_chan_rx_cb"/>
-                                    <setting name="rx_cb_arg" value="rx_cb_arg"/>
+                                    <setting name="rx_cb" value="PICC_data_mng_rx_cb"/>
+                                    <setting name="rx_cb_arg" value="rx_mng_cb_arg"/>
                                     <array name="ipcf_pools_t_array">
                                        <struct name="0">
                                           <setting name="num_bufs" value="30"/>

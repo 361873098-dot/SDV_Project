@@ -89,9 +89,14 @@ typedef struct {
 
 /** Application data */
 static App_Data_t g_appData;
+static App_Data_t g_unmngDat;
+
 
 /** link with generated variables */
-const void *rx_cb_arg = &g_appData;
+const void *rx_mng_cb_arg = &g_appData;
+
+const void *rx_unmg_cb_arg  = &g_unmngDat;
+
 
 /** Receive queue handle */
 static QueueHandle_t g_rxQueue = NULL;
@@ -162,7 +167,7 @@ static void App_LinkStateCallback(uint8 remoteId, PICC_LinkState_e state)
  * 
  * @note Only pushes message to queue, no complex processing
  */
-void data_chan_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *buf,
+void PICC_data_mng_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *buf,
         uint32 size)
 {
     App_Data_t *appPtr = (App_Data_t *)(*((uintptr *)arg));
@@ -202,7 +207,7 @@ void data_chan_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *buf,
 /**
  * @brief Control channel receive callback - ISR context
  */
-void ctrl_chan_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *mem)
+void PICC_data_unmng_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *mem)
 {
     App_Data_t *appPtr = (App_Data_t *)(*((uintptr *)arg));
     
@@ -210,7 +215,7 @@ void ctrl_chan_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *mem)
     (void)chan_id;
     (void)mem;
 
-    if (appPtr != &g_appData) {
+    if (appPtr != &g_unmngDat) {
         HANDLE_ERROR(-IPC_SHM_E_INVAL);
         return;
     }
