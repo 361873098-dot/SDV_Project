@@ -35,26 +35,11 @@ extern "C"{
 /**
  * @brief PICC Pre-OS Initialization
  *
- * Initializes IPCF driver, PICC channels/services/links, and power management.
+ * Initializes IPCF driver, PICC channels/services/links.
  * Called from main() before vTaskStartScheduler().
  * Does NOT depend on the RTOS scheduler being active.
  */
 void PICC_PreOS_Init(void);
-
-/**
- * @brief Initialize PICC infrastructure (internal to picc_main)
- */
-void PICC_InfraInit(void);
-
-/**
- * @brief Initialize IPCF channel for PICC (internal to picc_main)
- */
-sint8 PICC_InitChannel(uint8 instanceId, uint8 channelId);
-
-/**
- * @brief Process received data (internal to picc_main)
- */
-sint8 PICC_ProcessRxData(const uint8 instance, uint8 chan_id, const void *buf, uint32 size);
 
 /**
  * @brief RX message processing task (event-driven, queue blocking)

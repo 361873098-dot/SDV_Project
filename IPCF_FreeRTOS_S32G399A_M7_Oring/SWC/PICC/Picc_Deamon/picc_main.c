@@ -35,9 +35,18 @@ extern "C"{
 
 /* PICC module */
 #include "picc_api.h"
-#include "picc_stack.h"     /* For PICC_STACK_MAX_SIZE, PICC_ProcessRxData */
+#include "picc_mailbox.h"   /* For PICC_StoreToMailbox, PICC_MailboxInit */
+#include "picc_stack.h"     /* For PICC_STACK_MAX_SIZE, PICC_StackProcessRx, PICC_StackRegisterMsgCallback */
+#include "picc_protocol.h"  /* For PICC_MsgHeader_t, PICC_MSG_LINK_AVAILABLE */
+#include "picc_heartbeat.h" /* For PICC_HeartbeatInit, PICC_HeartbeatProcess */
+#include "picc_trace.h"     /* For PICC_TraceInit */
 
 #include "Port.h"
+
+/* Forward declaration — defined below PICC_PreOS_Init */
+static void PICC_ProcessSingleMessage(const PICC_MsgHeader_t *header,
+                                      const uint8 *payload, uint16 payloadLen,
+                                      uint8 instanceId, uint8 channelId);
 /*==================================================================================================
  *                                         Macro Definitions
  *==================================================================================================*/
@@ -197,6 +206,77 @@ void PICC_data_unmng_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void 
 }
 
 /*==================================================================================================
+ *                                   Infrastructure Initialization
+ *==================================================================================================*/
+
+/**
+ * @brief Heartbeat timeout handler — triggers link reconnect
+ */
+static void PICC_HeartbeatTimeoutHandler(uint8 instanceId, uint8 channelId)
+{
+    PICC_LinkTriggerReconnect(instanceId, channelId);
+}
+
+/**
+ * @brief Initialize PICC infrastructure (trace, service layer, mailbox)
+ *
+ * Called by PICC_PreOS_Init() before channel initialization.
+ */
+void PICC_InfraInit(void)
+{
+    /* 1. Initialize debug trace module */
+    PICC_TraceInit();
+
+    /* 2. Initialize service layer registry */
+    PICC_ServiceLayerInit();
+
+    /* 3. Stack message callback is registered separately in PICC_PreOS_Init */
+
+    /* 4. Initialize app contexts and mailboxes */
+    PICC_MailboxInit();
+}
+
+/**
+ * @brief Initialize specified IPCF channel (Stack + Heartbeat)
+ *
+ * Called by PICC_PreOS_Init() for each channel.
+ */
+sint8 PICC_InitChannel(uint8 instanceId, uint8 channelId)
+{
+    PICC_StackConfig_t stackCfg;
+    sint8 ret;
+    static boolean heartbeatInitialized = FALSE;
+
+    /* 1. Initialize heartbeat module on first channel init */
+    if (heartbeatInitialized == FALSE) {
+        ret = PICC_HeartbeatInit();
+        if (ret != 0) {
+            return PICC_E_NOT_INIT;
+        }
+        (void)PICC_HeartbeatRegisterTimeoutCallback(PICC_HeartbeatTimeoutHandler);
+        heartbeatInitialized = TRUE;
+    }
+
+    /* 2. Initialize Stack layer for this channel */
+    stackCfg.channelId  = channelId;
+    stackCfg.maxSize    = PICC_STACK_MAX_SIZE;
+    stackCfg.periodMs   = PICC_STACK_SEND_PERIOD_MS;
+    stackCfg.crcEnabled = PICC_STACK_CRC_ENABLED;
+    ret = PICC_StackInitChannel(&stackCfg);
+    if (ret != 0) {
+        return ret;
+    }
+
+    /* 3. Add channel to heartbeat monitoring */
+    ret = PICC_HeartbeatAddChannel(instanceId, channelId);
+    if (ret != 0) {
+        return ret;
+    }
+
+    return PICC_E_OK;
+}
+
+/*==================================================================================================
  *                                         PreOS Initialization
  *==================================================================================================*/
 
@@ -206,7 +286,6 @@ void PICC_data_unmng_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void 
  * Performs all one-time initialization:
  * - IPCF driver init (internally creates softirq task)
  * - PICC channel/service/link init
- * - Power management init
  * 
  * @note This function does NOT depend on the RTOS scheduler being active.
  *       All FreeRTOS API calls used here (xQueueCreate, xTaskCreate inside
@@ -257,9 +336,14 @@ void PICC_PreOS_Init(void)
     }
 
     /* ========================================================================
-     * 4. Initialize PICC infrastructure (trace, service layer, stack callback)
+     * 4. Initialize PICC infrastructure (trace, service layer)
      * ======================================================================== */
     PICC_InfraInit();
+
+    /* ========================================================================
+     * 4b. Register stack message callback (message dispatcher)
+     * ======================================================================== */
+    (void)PICC_StackRegisterMsgCallback(PICC_ProcessSingleMessage);
 
     /* ========================================================================
      * 5. Initialize IPCF channels (Stack + Heartbeat)
@@ -284,8 +368,83 @@ void PICC_PreOS_Init(void)
 }
 
 /*==================================================================================================
+ *                                    Message Dispatching
+ *==================================================================================================*/
+
+/**
+ * @brief Process single decoded message (callback registered with Stack layer)
+ *
+ * 1. Link messages -> PICC_LinkProcessMessage
+ * 2. Service messages -> Store to mailbox, then dispatch to service layer
+ */
+static void PICC_ProcessSingleMessage(const PICC_MsgHeader_t *header,
+                                      const uint8 *payload, uint16 payloadLen,
+                                      uint8 instanceId, uint8 channelId)
+{
+    if (header == NULL) {
+        return;
+    }
+
+    if (header->msgType == (uint8)PICC_MSG_LINK_AVAILABLE) {
+        /* Link message — handled by Link layer directly */
+        (void)PICC_LinkProcessMessage(header, payload, payloadLen, instanceId, channelId);
+    } else {
+        uint8  cbResult[PICC_CB_RESULT_MAX_LEN];
+        uint16 cbResultLen = 0U;
+
+        /* Store to mailbox FIRST (so polling always works) */
+        PICC_StoreToMailbox(header, payload, payloadLen);
+
+        /* Dispatch to service layer — callback writes cbResult */
+        (void)PICC_ServiceProcessMessage(header, payload, payloadLen,
+                                         instanceId, channelId,
+                                         cbResult, &cbResultLen);
+
+        /* Store callback result into the same mailbox slot */
+        if (cbResultLen > 0U) {
+            PICC_StoreCallbackResult(header, cbResult, cbResultLen);
+        }
+    }
+}
+
+/*==================================================================================================
  *                                         RX Message Task (Event-Driven)
  *==================================================================================================*/
+
+/**
+ * @brief Process received IPCF raw data
+ * 
+ * Unpacks the stacked format and dispatches individual messages
+ * via PICC_StackProcessRx -> PICC_ProcessSingleMessage callback.
+ *
+ * @param[in] instance  IPCF instance
+ * @param[in] chan_id   Channel ID
+ * @param[in] buf       Raw data buffer
+ * @param[in] size      Buffer size
+ * @return PICC_E_OK on success, negative on failure
+ */
+static sint8 PICC_ProcessRxData(const uint8 instance, uint8 chan_id,
+                                 const void *buf, uint32 size)
+{
+    const uint8 *data;
+    sint8 ret;
+
+    if (buf == NULL) {
+        return PICC_E_PARAM;
+    }
+
+    data = (const uint8 *)buf;
+
+    if (size >= PICC_STACK_OVERHEAD_SIZE) {
+        ret = PICC_StackProcessRx(data, size, instance, chan_id);
+        if (ret >= 0) {
+            return PICC_E_OK;
+        }
+        return PICC_E_PARAM;
+    }
+
+    return PICC_E_PARAM;
+}
 
 /**
  * @brief RX message processing task (event-driven, queue blocking)

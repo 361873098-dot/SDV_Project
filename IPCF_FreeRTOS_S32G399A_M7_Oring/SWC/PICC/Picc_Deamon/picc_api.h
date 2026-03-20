@@ -69,22 +69,53 @@ typedef enum {
 /**
  * @brief Per-application PICC configuration
  *
- * Passed to PICC_Init() to register one application.
+ * Passed to PICC_Init() to register one application with the PICC driver.
  * All internal registrations (Link, Method handler, Event handler) are
  * performed automatically inside PICC_Init().
  *
- * If methodHandler/eventHandler is NULL, the driver still stores received
- * data in its internal mailbox. The application can later retrieve data
- * using PICC_GetMethodData() / PICC_GetEventData().
+ * Callback Design Principle:
+ *   All three callback fields (linkStateCallback, methodHandler, eventHandler)
+ *   are OPTIONAL. Passing NULL means the application uses polling mode for
+ *   that particular feature. Passing a valid function pointer enables
+ *   immediate callback mode IN ADDITION to polling (both work simultaneously).
+ *
+ * linkStateCallback:
+ *   - NULL  : Application polls link state via PICC_GetLinkState(channelId).
+ *             Suitable for periodic tasks (e.g., Pwsm 10ms cycle).
+ *   - !NULL : Driver calls this function immediately when link state changes
+ *             (connected/disconnected). Suitable for applications requiring
+ *             instant reaction (e.g., DIAG module raising DTC on disconnect).
+ *
+ * methodHandler:
+ *   - NULL  : Received Method requests are stored in the internal mailbox.
+ *             Application retrieves data via PICC_GetMethodData() polling.
+ *             Suitable for non-time-critical services (e.g., power management).
+ *   - !NULL : Driver calls this function immediately when an A-core Method
+ *             request arrives. The callback can return response data directly.
+ *             Suitable for time-critical services (e.g., OTA flash write,
+ *             diagnostic data read) where 10ms polling delay is unacceptable.
+ *             NOTE: Mailbox storage still occurs even when callback is set.
+ *
+ * eventHandler:
+ *   - NULL  : Received Event notifications are stored in the internal mailbox.
+ *             Application retrieves data via PICC_GetEventData() polling.
+ *   - !NULL : Driver calls this function immediately when an A-core Event
+ *             notification arrives. Suitable for microsecond-precision tasks
+ *             (e.g., time synchronization timestamp capture).
+ *             NOTE: Mailbox storage still occurs even when callback is set.
+ *
+ * This design ensures PICC_Init() is fully compatible with all application
+ * scenarios — from simple polling to complex real-time callback processing —
+ * without requiring any API changes.
  */
 typedef struct {
     uint8                    localId;           /**< Local ID (ProviderID for Server, ConsumerID for Client) */
-    uint8                    remoteId;          /**< Remote ID */
+    uint8                    remoteId;          /**< Remote ID (peer's ProviderID or ConsumerID) */
     PICC_Role_e              role;              /**< PICC_ROLE_SERVER or PICC_ROLE_CLIENT */
     uint8                    channelId;         /**< IPCF channel ID (1 or 2) */
-    PICC_LinkStateCallback_t linkStateCallback; /**< Link state callback (can be NULL) */
-    PICC_MethodCallback_t    methodHandler;     /**< Method handler (can be NULL, use polling) */
-    PICC_EventCallback_t     eventHandler;      /**< Event handler (can be NULL, use polling) */
+    PICC_LinkStateCallback_t linkStateCallback; /**< Link state change callback (NULL = use PICC_GetLinkState polling) */
+    PICC_MethodCallback_t    methodHandler;     /**< Method request callback (NULL = use PICC_GetMethodData polling) */
+    PICC_EventCallback_t     eventHandler;      /**< Event notification callback (NULL = use PICC_GetEventData polling) */
 } PICC_AppConfig_t;
 
 /*==================================================================================================
@@ -95,14 +126,22 @@ typedef struct {
  * @brief Register one application with the PICC driver
  *
  * Performs all internal registrations (Link, Method handler, Event handler,
- * Link state callback). The application layer only needs to call this once
- * during its own Xxx_Init().
+ * Link state callback) in a single call. The application layer only needs
+ * to call this function once during its own Xxx_Init().
  *
- * PICC_PreOS_Init() must have been called first.
+ * This function is designed to be universally compatible across all application
+ * modules. Different applications can independently choose polling mode
+ * (callback = NULL) or immediate callback mode for each feature by setting
+ * the corresponding fields in PICC_AppConfig_t.
  *
- * @param[in] appIndex  Application index (PICC_AppIndex_e)
- * @param[in] config    Application configuration and callback pointers
- * @return PICC_E_OK on success, negative on failure
+ * Prerequisites:
+ *   - PICC_PreOS_Init() must have been called first.
+ *
+ * @param[in] appIndex  Application index from PICC_AppIndex_e enum
+ * @param[in] config    Pointer to application configuration (callbacks + IDs)
+ * @return PICC_E_OK        on success
+ * @return PICC_E_PARAM     if config is NULL or appIndex is out of range
+ * @return PICC_E_NOT_INIT  if PICC infrastructure not yet initialized
  */
 sint8 PICC_Init(PICC_AppIndex_e appIndex, const PICC_AppConfig_t *config);
 
@@ -157,17 +196,20 @@ sint8 PICC_MethodResponse(uint8 consumerId, uint8 methodId,
  * Checks internally whether new data is available.
  * If available, copies data to buffer and clears the ready flag.
  *
- * @param[in]  appIndex   Application index
- * @param[in]  methodId   Method ID to check
- * @param[out] data       Buffer to receive data
- * @param[in]  maxLen     Buffer max length
- * @param[out] actualLen  Actual data length received
+ * @param[in]  appIndex    Application index
+ * @param[in]  methodId    Method ID to check
+ * @param[out] data        Buffer to receive data
+ * @param[in]  maxLen      Buffer max length
+ * @param[out] actualLen   Actual data length received
+ * @param[out] cbResult    Optional callback result buffer (NULL to ignore)
+ * @param[out] cbResultLen Optional callback result length (NULL to ignore)
  * @return PICC_E_OK      = new data retrieved (flag cleared)
  *         PICC_E_NO_DATA = no new data
  *         PICC_E_PARAM   = invalid parameters
  */
 sint8 PICC_GetMethodData(PICC_AppIndex_e appIndex, uint8 methodId,
-                         uint8 *data, uint16 maxLen, uint16 *actualLen);
+                         uint8 *data, uint16 maxLen, uint16 *actualLen,
+                         uint8 *cbResult, uint16 *cbResultLen);
 
 /**
  * @brief Get A-core Method response data (Client role receives A-core reply)
@@ -180,13 +222,16 @@ sint8 PICC_GetMethodData(PICC_AppIndex_e appIndex, uint8 methodId,
  * @param[out] data        Buffer to receive response data
  * @param[in]  maxLen      Buffer max length
  * @param[out] actualLen   Actual data length
+ * @param[out] cbResult    Optional callback result buffer (NULL to ignore)
+ * @param[out] cbResultLen Optional callback result length (NULL to ignore)
  * @return PICC_E_OK       = new response retrieved
  *         PICC_E_NO_DATA  = no response yet
  *         PICC_E_PARAM    = invalid parameters
  */
 sint8 PICC_GetResponseData(PICC_AppIndex_e appIndex, uint8 methodId,
                            uint8 *returnCode,
-                           uint8 *data, uint16 maxLen, uint16 *actualLen);
+                           uint8 *data, uint16 maxLen, uint16 *actualLen,
+                           uint8 *cbResult, uint16 *cbResultLen);
 
 /**
  * @brief Get A-core Event notification data
@@ -196,12 +241,15 @@ sint8 PICC_GetResponseData(PICC_AppIndex_e appIndex, uint8 methodId,
  * @param[out] data        Buffer to receive event data
  * @param[in]  maxLen      Buffer max length
  * @param[out] actualLen   Actual data length
+ * @param[out] cbResult    Optional callback result buffer (NULL to ignore)
+ * @param[out] cbResultLen Optional callback result length (NULL to ignore)
  * @return PICC_E_OK       = new event retrieved
  *         PICC_E_NO_DATA  = no new event
  *         PICC_E_PARAM    = invalid parameters
  */
 sint8 PICC_GetEventData(PICC_AppIndex_e appIndex, uint8 eventId,
-                        uint8 *data, uint16 maxLen, uint16 *actualLen);
+                        uint8 *data, uint16 maxLen, uint16 *actualLen,
+                        uint8 *cbResult, uint16 *cbResultLen);
 
 /*==================================================================================================
  *                              Public API — Status Query (1 function)

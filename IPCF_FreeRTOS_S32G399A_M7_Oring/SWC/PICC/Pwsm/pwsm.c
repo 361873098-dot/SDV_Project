@@ -108,7 +108,7 @@ void Pwsm_CommEvent(void)
         Pwsm_RxMsgTimeOutId2++;
         
         /* Poll for Method ID 2 (PWR_METHOD_STATE_ACK) */
-        if (PICC_GetMethodData(PICC_APP_PWR, PWR_METHOD_STATE_ACK, buf, sizeof(buf), &len) == PICC_E_OK)
+        if (PICC_GetMethodData(PICC_APP_PWR, PWR_METHOD_STATE_ACK, buf, sizeof(buf), &len, NULL, NULL) == PICC_E_OK)
         {
             if (len >= 2U && buf[0] == PWR_CORE_A) {
                 Pwsm_MsgState = PWSM_STATE_MSG_RX_ID8;
@@ -125,7 +125,7 @@ void Pwsm_CommEvent(void)
         Pwsm_RxMsgTimeOutId8++;
         
         /* Poll for Method ID 8 (PWR_METHOD_EVENT_DONE) */
-        if (PICC_GetMethodData(PICC_APP_PWR, PWR_METHOD_EVENT_DONE, buf, sizeof(buf), &len) == PICC_E_OK)
+        if (PICC_GetMethodData(PICC_APP_PWR, PWR_METHOD_EVENT_DONE, buf, sizeof(buf), &len, NULL, NULL) == PICC_E_OK)
         {
             if (len >= 1U && buf[0] == (uint8)PWR_DONE_FIRST_STEP) {
                 Pwsm_MsgState = PWSM_STATE_MSG_TX_ID4;  /* Enter state to send Event ID=4 */
@@ -154,7 +154,7 @@ void Pwsm_CommEvent(void)
         Pwsm_RxMsgTimeOutId11++;
         
         /* Poll for Method ID 11 (PWR_METHOD_CTRL_ACK) */
-        if (PICC_GetMethodData(PICC_APP_PWR, PWR_METHOD_CTRL_ACK, buf, sizeof(buf), &len) == PICC_E_OK)
+        if (PICC_GetMethodData(PICC_APP_PWR, PWR_METHOD_CTRL_ACK, buf, sizeof(buf), &len, NULL, NULL) == PICC_E_OK)
         {
             if (len >= 2U && buf[0] == PWR_CORE_A) {
                 Pwsm_MsgState = PWSM_STATE_MSG_SHUTDOWN_DONE;
