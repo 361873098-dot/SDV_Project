@@ -1,5 +1,27 @@
 # PICC API 使用说明
 
+## 0. 核心通信方向与角色向导 (Directionality & Role Summary)
+
+在深入具体 API 之前，**必须先理清 M核与A核 之间两种通信协议的数据流向**。明确了方向，您就知道什么时候该调用什么接口。
+
+### 1) EVENT 协议 (单向通知 / Fire-and-Forget)
+**特性**：发即忘（类似 UDP 广播），发送方无需对方回复处理结果（无需 Response）。
+*   【**发送方向**：M核 ➡ A核】 (`M -> A`)
+    *   **动作**：M核主动调用 `PICC_SendEvent()`。
+*   【**接收方向**：A核 ➡ M核】 (`A -> M`)
+    *   **动作**：M核通过初始化时注册的 `.eventHandler` 捕获即时硬中断通知；**或者**在周期任务中主动轮询 `PICC_GetEventData()` 读取。
+
+### 2) METHOD 协议 (双向请求 / Request-Response)
+**特性**：一问一答（类似 RPC），Client 提问发起 Request，Server 作答返回 Response。
+*   **情形 A：M核是 Client（M核提问，A核作答）**
+    *   【**发起请求**：M核 ➡ A核】 (`M -> A`)：M核主动调用 `PICC_MethodRequest()` 发送指令。
+    *   【**提取应答**：A核 ➡ M核】 (`A -> M`)：M核在周期任务中轮询 `PICC_GetResponseData()` 收割 A核的处理结果。
+*   **情形 B：M核是 Server（A核提问，M核作答）**
+    *   【**提取请求**：A核 ➡ M核】 (`A -> M`)：M核通过初始化时注册的 `.methodHandler` 捕获 A核的瞬间请求；**或者**在周期任务中轮询 `PICC_GetMethodData()` 拿到 A核发来的指令数据。
+    *   【**反馈应答**：M核 ➡ A核】 (`M -> A`)：M核在处理完业务后，必须主动调用 `PICC_MethodResponse()` 给 A核擦屁股回包以结束会话。
+
+---
+
 ## 1. 概述
 
 `picc_api.h` 是 M 核应用层与 PICC 驱动层交互的**唯一公共接口头文件**。  
@@ -121,11 +143,17 @@ void Pwsm_Main(void)  /* 10ms 周期任务 */
 
     if (PICC_GetLinkState(2U) != PICC_LINK_STATE_CONNECTED) return;
 
+    /* 【提取请求：A ➡ M】（METHOD 场景B：M核是 Server 获取请求） */
     /* 没注册回调，不需要 cbResult，后两个参数传 NULL, NULL */
     if (PICC_GetMethodData(PICC_APP_PWR, 2U, buf, sizeof(buf), &len,
                            NULL, NULL) == PICC_E_OK) {
         uint8 ackState = buf[0];
-        /* 处理收到的 Method Request (ID=2)... */
+        /* 第1步：处理收到的 Method Request (ID=2) 的业务逻辑... */
+        
+        /* 【反馈应答：M ➡ A】（METHOD 场景B：M核必须回复 Response 形成 RPC 闭环！） */
+        /* ⚠️ 防呆提示：因为您没注册回调函数，所以必须由您手动调用 MethodResponse 发送回包结束本次会话！ */
+        uint8 rspPayload[1] = { 0x00 }; /* 假设 0x00 表示处理成功 */
+        (void)PICC_MethodResponse(0x06, 2U, 0U /* 假设sessionId为0 */, 0x00, rspPayload, 1, 0, 2U);
     }
 }
 ```
@@ -167,7 +195,8 @@ void TimeSync_Main(void)  /* 10ms 周期任务 */
     uint8 remoteData[8]; uint16 remoteLen;
     uint8 cbResult[8];   uint16 cbLen;
 
-    /* 一次 API 调用！邮箱会把刚才记录的回调时间戳一并返回 */
+    /* 【提取通知：A ➡ M】（EVENT 接收通知） */
+    /* 只需这 1 个 API（无需查全局变量），就能同时提取远端包裹和刚才顺手记录的本地时间戳！ */
     if (PICC_GetEventData(PICC_APP_TIMESYNC, 0x01U,
                           remoteData, sizeof(remoteData), &remoteLen,
                           cbResult, &cbLen) == PICC_E_OK)
@@ -179,6 +208,11 @@ void TimeSync_Main(void)  /* 10ms 周期任务 */
                          
         /* 有了 A核数据(remoteData) + 回调记录的即时本地时间戳(localTs)，即可开始对齐计算 */
         TimeSync_CalculateOffset(localTs, remoteData, remoteLen);
+        
+        /* 【主动发送通知：M ➡ A】（EVENT 发送单向通知） */
+        /* 同步计算完成后，如果想立刻反向报喜给 A核，因为是 EVENT，发出去就不管了 */
+        uint8 syncDoneMsg[1] = { 0x01 }; 
+        (void)PICC_SendEvent(0x61, 0x02U, 0x66, syncDoneMsg, 1, PICC_EVENT_NO_ACK, 1U);
     }
 }
 ```
@@ -192,8 +226,13 @@ static uint8 OTA_MethodHandler(uint8 consumerId, uint8 methodId,
                                 uint8 *cbResult, uint16 *cbResultLen)
 {
     if (methodId == 0x03U) {
-        /* 即刻进行擦写操作 */
+        /* [即刻进行擦写操作] */
         sint8 ret = Flash_Write(reqData, reqLen);
+        
+        /* 【反馈应答准备：M ➡ A】（METHOD 场景B：自动闭环） */
+        /* ⚠️ 高级用法防呆提示：由于您在此注册了 Callback 函数！ */
+        /* 驱动底层在拿到下面的 rspData 和 rspLen 赋值后，会【全自动调用 PICC_MethodResponse()】替您擦屁股！ */
+        /* 您在下文的 OTA_Main 手动轮询时，就『绝不能』再去调用一次 MethodResponse 重复发包了。 */
         rspData[0] = (ret == 0) ? 0x00U : 0x01U;
         *rspLen = 1U;
 
@@ -206,12 +245,30 @@ static uint8 OTA_MethodHandler(uint8 consumerId, uint8 methodId,
     return 0x01;
 }
 
+void OTA_Init(void)
+{
+    static const PICC_AppConfig_t cfg = {
+        .localId = 0x11, .remoteId = 0x16,
+        .role = PICC_ROLE_SERVER, .channelId = 2U,
+        .linkStateCallback = NULL,
+        .methodHandler     = OTA_MethodHandler, /* <--- 在这里注册回调！ */
+        .eventHandler      = NULL
+    };
+    (void)PICC_Init(PICC_APP_OTA, &cfg);
+}
+
 void OTA_Main(void)
 {
     uint8 data[32]; uint16 len;
     uint8 cbResult[8]; uint16 cbLen;
 
-    /* 周期任务完全省去写全局变量，在这里检查是否有完成烧写的块 */
+    /* 【主动请求：M ➡ A】（METHOD 场景A：M核主动扮演 Client) */
+    /* 例如如果 M核 OTA 觉得该下一包了，可以随时发起 MethodRequest 要更新数据 */
+    // uint8 reqCmd[2] = {0x00, 0x01};
+    // (void)PICC_MethodRequest(0x16, 0x02U, reqCmd, 2U, PICC_METHOD_TYPE_REQUEST, 0, 2U);
+
+    /* 【提取请求（已自动回复妥当）：A ➡ M】（METHOD 场景B：获取通知和回调果实） */
+    /* 周期任务完全省去写全局变量，在这里直接检查刚才瞬间的回调有没有完成烧写的块 */
     if (PICC_GetMethodData(PICC_APP_OTA, 0x03U, data, sizeof(data), &len,
                            cbResult, &cbLen) == PICC_E_OK) {
         uint16 writtenBytes = ((uint16)cbResult[0] << 8U) | cbResult[1];
