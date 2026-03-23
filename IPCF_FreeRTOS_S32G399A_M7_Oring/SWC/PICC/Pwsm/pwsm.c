@@ -95,9 +95,8 @@ void Pwsm_CommEvent(void)
     {
         /* Send Event ID 0x01 (PWR_EVENT_STATE_NOTIFY) */
         uint8 payload[1] = { (uint8)PWR_STATE_STANDBY };
-        (void)PICC_SendEvent(PWR_PROVIDER_ID, PWR_EVENT_STATE_NOTIFY,
-                             PWR_CONSUMER_ID, payload, 1U,
-                             PICC_EVENT_WITH_ACK, PWR_CHANNEL_ID);
+        (void)PICC_SendEvent(PICC_APP_PWR, PWR_EVENT_STATE_NOTIFY,
+                             payload, 1U, PICC_EVENT_WITH_ACK);
         Pwsm_RxMsgTimeOutId2 = 0U;
         Pwsm_RxMsgTimeOutId8 = 0U;
         Pwsm_MsgState = PWSM_STATE_MSG_RX_ID2;
@@ -142,9 +141,8 @@ void Pwsm_CommEvent(void)
     {
         /* Send Event ID 4 (PWR_EVENT_CTRL_CMD) */
         uint8 payload[2] = { PWR_CORE_A, (uint8)PWR_CMD_HARDWARE_SHUTDOWN };
-        (void)PICC_SendEvent(PWR_PROVIDER_ID, PWR_EVENT_CTRL_CMD,
-                             PWR_CONSUMER_ID, payload, 2U,
-                             PICC_EVENT_WITH_ACK, PWR_CHANNEL_ID);
+        (void)PICC_SendEvent(PICC_APP_PWR, PWR_EVENT_CTRL_CMD,
+                             payload, 2U, PICC_EVENT_WITH_ACK);
         Pwsm_RxMsgTimeOutId11 = 0U;
         Pwsm_MsgState = PWSM_STATE_MSG_RX_ID11;
         break;

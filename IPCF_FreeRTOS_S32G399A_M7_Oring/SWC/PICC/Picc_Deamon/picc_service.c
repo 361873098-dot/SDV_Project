@@ -378,11 +378,11 @@ sint8 PICC_RegisterResponseHandler(PICC_ResponseCallback_t callback)
  *==================================================================================================*/
 
 /**
- * @brief Send Event notification
+ * @brief Send Event notification (internal service layer function)
  */
-sint8 PICC_SendEvent(uint8 providerId, uint8 eventId, uint8 consumerId,
-                     const uint8 *data, uint16 len, PICC_EventType_e withAck,
-                     uint8 channelId)
+sint8 PICC_ServiceEventSend(uint8 providerId, uint8 eventId, uint8 consumerId,
+                            const uint8 *data, uint16 len, PICC_EventType_e withAck,
+                            uint8 channelId)
 {
     PICC_MsgHeader_t header;
     sint8 ret;

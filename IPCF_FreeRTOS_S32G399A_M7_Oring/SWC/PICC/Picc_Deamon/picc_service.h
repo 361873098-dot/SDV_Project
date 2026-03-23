@@ -195,8 +195,8 @@ sint8 PICC_RegisterMethodHandler(uint8 localProviderId, PICC_MethodCallback_t ca
 sint8 PICC_RegisterResponseHandler(PICC_ResponseCallback_t callback);
 
 /**
- * @brief Send Event notification
- * 
+ * @brief Send Event notification (internal service layer function)
+ *
  * @param[in] providerId  Sender's ProviderID
  * @param[in] eventId     Event ID
  * @param[in] consumerId  Target client ID
@@ -206,9 +206,9 @@ sint8 PICC_RegisterResponseHandler(PICC_ResponseCallback_t callback);
  * @param[in] channelId   IPCF channel ID
  * @return 0 on success, non-zero on failure
  */
-sint8 PICC_SendEvent(uint8 providerId, uint8 eventId, uint8 consumerId,
-                     const uint8 *data, uint16 len, PICC_EventType_e withAck,
-                     uint8 channelId);
+sint8 PICC_ServiceEventSend(uint8 providerId, uint8 eventId, uint8 consumerId,
+                            const uint8 *data, uint16 len, PICC_EventType_e withAck,
+                            uint8 channelId);
 
 #if defined(__cplusplus)
 }

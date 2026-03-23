@@ -1,5 +1,33 @@
 # PICC API 使用说明
 
+## 📌 v2.0 重要简化更新
+
+从 v2.0 版本开始，所有发送 API 已大幅简化：
+
+**之前（v1.x）**：
+```c
+// 需要手动传递 7-8 个参数，包括 providerId, consumerId, instanceId, channelId
+PICC_SendEvent(0x61, 0x02U, 0x66, data, len, PICC_EVENT_WITHOUT_ACK, 1U);
+PICC_MethodRequest(0x16, 0x02U, data, 2U, PICC_METHOD_WITH_RESPONSE, 0, 2U);
+PICC_MethodResponse(0x06, 2U, sessionId, 0x00, rspData, 1, 0, 2U);
+```
+
+**现在（v2.0）**：
+```c
+// 只需传递 appIndex，驱动自动从 PICC_Init() 配置中获取 ID 和 channelId
+PICC_SendEvent(PICC_APP_TIMESYNC, 0x02U, data, len, PICC_EVENT_WITHOUT_ACK);
+PICC_MethodRequest(PICC_APP_OTA, 0x02U, data, 2U, PICC_METHOD_WITH_RESPONSE);
+PICC_MethodResponse(PICC_APP_PWR, 2U, sessionId, 0x00, rspData, 1);
+```
+
+**优势**：
+- 参数数量从 7-8 个减少到 4-5 个
+- 不需要应用层维护 ID 常量，只需知道自己的 `PICC_APP_xxx` 枚举
+- 消除了传错 channelId 或 instanceId 的可能性
+- `PICC_Init()` 配置保持不变，完全向后兼容
+
+---
+
 ## 0. 核心通信方向与角色向导 (Directionality & Role Summary)
 
 在深入具体 API 之前，**必须先理清 M核与A核 之间两种通信协议的数据流向**。明确了方向，您就知道什么时候该调用什么接口。
@@ -34,13 +62,15 @@
 | # | 函数 | 方向 | 用途 |
 |---|------|------|------|
 | 1 | `PICC_Init()` | 初始化 | 注册一个应用模块并配置回调 |
-| 2 | `PICC_SendEvent()` | M→A | 发送 Event 通知 |
-| 3 | `PICC_MethodRequest()` | M→A | 发送 Method 请求（Client 角色） |
-| 4 | `PICC_MethodResponse()` | M→A | 发送 Method 响应（Server 角色） |
+| 2 | `PICC_SendEvent()` | M→A | 发送 Event 通知（简化版：自动使用 Init 时的配置） |
+| 3 | `PICC_MethodRequest()` | M→A | 发送 Method 请求（简化版：自动使用 Init 时的配置） |
+| 4 | `PICC_MethodResponse()` | M→A | 发送 Method 响应（简化版：自动使用 Init 时的配置） |
 | 5 | `PICC_GetMethodData()` | A→M | 获取 A 核发来的 Method 请求数据及回调结果 |
 | 6 | `PICC_GetResponseData()` | A→M | 获取 A 核返回的 Method 响应数据及回调结果 |
 | 7 | `PICC_GetEventData()` | A→M | 获取 A 核发来的 Event 通知数据及回调结果 |
 | 8 | `PICC_GetLinkState()` | 查询 | 查询指定通道的链路连接状态 |
+
+**重要改进**：从 v2.0 开始，所有发送 API（SendEvent/MethodRequest/MethodResponse）都已简化，不再需要手动传递 `providerId`、`consumerId`、`instanceId`、`channelId` 等参数。驱动会自动从 `PICC_Init()` 时注册的配置中获取这些信息。
 
 ---
 
@@ -153,7 +183,7 @@ void Pwsm_Main(void)  /* 10ms 周期任务 */
         /* 【反馈应答：M ➡ A】（METHOD 场景B：M核必须回复 Response 形成 RPC 闭环！） */
         /* ⚠️ 防呆提示：因为您没注册回调函数，所以必须由您手动调用 MethodResponse 发送回包结束本次会话！ */
         uint8 rspPayload[1] = { 0x00 }; /* 假设 0x00 表示处理成功 */
-        (void)PICC_MethodResponse(0x06, 2U, 0U /* 假设sessionId为0 */, 0x00, rspPayload, 1, 0, 2U);
+        (void)PICC_MethodResponse(PICC_APP_PWR, 2U, 0U /* 假设sessionId为0 */, 0x00, rspPayload, 1);
     }
 }
 ```
@@ -211,8 +241,8 @@ void TimeSync_Main(void)  /* 10ms 周期任务 */
         
         /* 【主动发送通知：M ➡ A】（EVENT 发送单向通知） */
         /* 同步计算完成后，如果想立刻反向报喜给 A核，因为是 EVENT，发出去就不管了 */
-        uint8 syncDoneMsg[1] = { 0x01 }; 
-        (void)PICC_SendEvent(0x61, 0x02U, 0x66, syncDoneMsg, 1, PICC_EVENT_NO_ACK, 1U);
+        uint8 syncDoneMsg[1] = { 0x01 };
+        (void)PICC_SendEvent(PICC_APP_TIMESYNC, 0x02U, syncDoneMsg, 1, PICC_EVENT_WITHOUT_ACK);
     }
 }
 ```
@@ -265,7 +295,7 @@ void OTA_Main(void)
     /* 【主动请求：M ➡ A】（METHOD 场景A：M核主动扮演 Client) */
     /* 例如如果 M核 OTA 觉得该下一包了，可以随时发起 MethodRequest 要更新数据 */
     // uint8 reqCmd[2] = {0x00, 0x01};
-    // (void)PICC_MethodRequest(0x16, 0x02U, reqCmd, 2U, PICC_METHOD_TYPE_REQUEST, 0, 2U);
+    // (void)PICC_MethodRequest(PICC_APP_OTA, 0x02U, reqCmd, 2U, PICC_METHOD_WITH_RESPONSE);
 
     /* 【提取请求（已自动回复妥当）：A ➡ M】（METHOD 场景B：获取通知和回调果实） */
     /* 周期任务完全省去写全局变量，在这里直接检查刚才瞬间的回调有没有完成烧写的块 */

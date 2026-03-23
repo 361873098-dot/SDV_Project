@@ -268,6 +268,21 @@ void PICC_MailboxUnregisterApp(PICC_AppIndex_e appIndex)
     }
 }
 
+sint8 PICC_MailboxGetAppConfig(PICC_AppIndex_e appIndex, const PICC_AppConfig_t **config)
+{
+    if ((uint8)appIndex >= (uint8)PICC_APP_MAX) {
+        return PICC_E_PARAM;
+    }
+    if (g_appContexts[(uint8)appIndex].isRegistered == FALSE) {
+        return PICC_E_PARAM;
+    }
+    if (config == NULL) {
+        return PICC_E_PARAM;
+    }
+    *config = &g_appContexts[(uint8)appIndex].config;
+    return PICC_E_OK;
+}
+
 /*==================================================================================================
  *                                  Public Interface — Store (incoming)
  *==================================================================================================*/

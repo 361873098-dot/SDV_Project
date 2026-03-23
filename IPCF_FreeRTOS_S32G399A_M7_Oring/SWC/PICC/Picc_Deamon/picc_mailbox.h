@@ -66,6 +66,15 @@ boolean PICC_MailboxIsAppRegistered(PICC_AppIndex_e appIndex);
  */
 void PICC_MailboxUnregisterApp(PICC_AppIndex_e appIndex);
 
+/**
+ * @brief Get a registered application's config
+ *
+ * @param[in]  appIndex  Application index
+ * @param[out] config    Output config pointer
+ * @return PICC_E_OK on success, PICC_E_PARAM if not registered or out of range
+ */
+sint8 PICC_MailboxGetAppConfig(PICC_AppIndex_e appIndex, const PICC_AppConfig_t **config);
+
 /*==================================================================================================
  *                                  Mailbox Store (incoming messages)
  *==================================================================================================*/
