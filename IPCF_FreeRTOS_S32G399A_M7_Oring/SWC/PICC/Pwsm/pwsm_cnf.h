@@ -127,8 +127,8 @@ PWSM_STATE_MSG_SHUTDOWN_DONE = ((uint8)0x17),
 #define PWSM_SHUTDOWN_DELAY_TICKS   ((uint16)100U)
 /* 2s = 200 * 10ms (increased from 200ms to allow A-core sufficient response time) */
 #define PWSM_MSG_TIMEOUT_RX_ID2      ((uint16)200U)
-/* 10s = 1000 * 10ms  */
-#define PWSM_MSG_TIMEOUT_RX_ID8      ((uint16)100U)
+/* 10s = 1000 * 10ms (increased from 1s: A-core needs time to complete Phase 1 shutdown) */
+#define PWSM_MSG_TIMEOUT_RX_ID8      ((uint16)1000U)
 /* 200ms */
 #define PWSM_MSG_TIMEOUT_RX_ID11      ((uint16)20U)
 

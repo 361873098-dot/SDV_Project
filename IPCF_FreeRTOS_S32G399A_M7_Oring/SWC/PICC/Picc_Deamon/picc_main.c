@@ -110,6 +110,155 @@ static QueueHandle_t g_rxQueue = NULL;
 /** Exit code (for main loop) */
 volatile uint8 exit_code;
 
+#if (PICC_DIAG_RECORD_ENABLE == 1U)
+/*==================================================================================================
+ *                                   Diagnostic Recording Variables
+ *==================================================================================================*/
+
+/** Diagnostic record buffer: 20 rows × 30 bytes per row */
+#define PICC_DIAG_RECORD_ROWS       (20U)
+#define PICC_DIAG_RECORD_COLS       (30U)
+
+/** Diagnostic record structure */
+typedef struct {
+    uint8   buffer[PICC_DIAG_RECORD_ROWS][PICC_DIAG_RECORD_COLS];  /**< Data buffer */
+    uint16  currentRow;                                              /**< Current row index (0-19) */
+    uint16  currentCol;                                              /**< Current column index in row */
+    uint16  totalRecords;                                            /**< Total records count */
+} PICC_DiagRecord_t;
+
+/** Diagnostic record for RX data */
+static PICC_DiagRecord_t g_diagRecordRx;
+
+/** Diagnostic record for TX data */
+static PICC_DiagRecord_t g_diagRecordTx;
+
+/**
+ * @brief Initialize diagnostic record structure
+ */
+static void PICC_DiagRecordInit(PICC_DiagRecord_t *record)
+{
+    uint16 i, j;
+
+    if (record == NULL) {
+        return;
+    }
+
+    for (i = 0U; i < PICC_DIAG_RECORD_ROWS; i++) {
+        for (j = 0U; j < PICC_DIAG_RECORD_COLS; j++) {
+            record->buffer[i][j] = 0U;
+        }
+    }
+
+    record->currentRow = 0U;
+    record->currentCol = 0U;
+    record->totalRecords = 0U;
+}
+
+/**
+ * @brief Add data to diagnostic record buffer (parse stacked packet, one message per row)
+ *
+ * Parses stacked packet format:
+ *   [CRC_Enable(1B)] [N × Protocol_Message] [Counter(2B)] [CRC(2B)]
+ * Each Protocol_Message: [Header(8B)] [Payload(variable)]
+ * Header: [ProviderID][MethodID][ConsumerID][SessionID][MsgType][RetCode][Len_Hi][Len_Lo]
+ *
+ * Each protocol message is stored in its own row:
+ *   buffer[row][0..N] = one complete protocol message bytes
+ *
+ * Heartbeat messages (ProviderID=0xFF or MethodID=0xFF) are filtered out.
+ *
+ * @param[in] record  Diagnostic record structure
+ * @param[in] data    Raw stacked packet data buffer
+ * @param[in] len     Data length
+ */
+static void PICC_DiagRecordAdd(PICC_DiagRecord_t *record, const uint8 *data, uint32 len)
+{
+    uint32 offset;
+    uint16 payloadLen;
+    uint32 msgLen;
+    uint32 copyLen;
+    uint32 col;
+    uint16 row;
+    const uint8 *msgPtr;
+
+    if (record == NULL || data == NULL || len == 0U) {
+        return;
+    }
+
+    /* Minimum stacked packet: [CRC_Enable 1B][Header 8B][Counter 2B][CRC 2B] = 13 bytes */
+    if (len < 13U) {
+        return;
+    }
+
+    /* Parse stacked packet: skip CRC_Enable byte, parse until Counter/CRC area */
+    /* Data area ends at len - 4 (2B Counter + 2B CRC) */
+    offset = 1U;  /* Skip CRC_Enable byte */
+
+    while (offset + PICC_HEADER_SIZE <= (len - 4U)) {
+        msgPtr = &data[offset];
+
+        /* Get payload length from header bytes 6-7 (big-endian) */
+        payloadLen = ((uint16)msgPtr[6] << 8U) | (uint16)msgPtr[7];
+        msgLen = PICC_HEADER_SIZE + payloadLen;
+
+        /* Sanity check: message should not exceed remaining data area */
+        if (offset + msgLen > (len - 4U)) {
+            break;
+        }
+
+        /* Filter heartbeat messages (ProviderID=0xFF or MethodID=0xFF) */
+        if ((msgPtr[0] == 0xFFU) || (msgPtr[1] == 0xFFU)) {
+            offset += msgLen;
+            continue;
+        }
+
+        /* Store this protocol message in a new row */
+        row = record->currentRow;
+
+        /* Copy message bytes (limited by column width) */
+        copyLen = msgLen;
+        if (copyLen > PICC_DIAG_RECORD_COLS) {
+            copyLen = PICC_DIAG_RECORD_COLS;
+        }
+
+        for (col = 0U; col < copyLen; col++) {
+            record->buffer[row][col] = msgPtr[col];
+        }
+
+        /* Clear remaining columns in this row */
+        for (col = copyLen; col < PICC_DIAG_RECORD_COLS; col++) {
+            record->buffer[row][col] = 0U;
+        }
+
+        /* Advance to next row (circular) */
+        record->currentRow++;
+        if (record->currentRow >= PICC_DIAG_RECORD_ROWS) {
+            record->currentRow = 0U;
+        }
+
+        record->totalRecords++;
+
+        /* Move to next message in stacked packet */
+        offset += msgLen;
+    }
+}
+
+#endif /* PICC_DIAG_RECORD_ENABLE */
+
+#if (PICC_DIAG_RECORD_ENABLE == 1U)
+/**
+ * @brief Add TX data to diagnostic record buffer (called from picc_stack.c)
+ *
+ * @param[in] data    Data buffer to record
+ * @param[in] len     Data length
+ */
+void PICC_DiagRecordAddTx(const uint8 *data, uint32 len)
+{
+    PICC_DiagRecordAdd(&g_diagRecordTx, data, len);
+}
+#endif /* PICC_DIAG_RECORD_ENABLE */
+
 /*==================================================================================================
  *                                         FreeRTOS Static Memory
  *==================================================================================================*/
@@ -148,7 +297,7 @@ void vApplicationGetTimerTaskMemory(StaticTask_t **ppxTimerTaskTCBBuffer,
 
 /**
  * @brief Data channel receive callback - ISR context
- * 
+ *
  * @note Only pushes message to queue, no complex processing
  */
 void PICC_data_mng_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *buf,
@@ -166,6 +315,11 @@ void PICC_data_mng_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *b
     }
 
     appPtr->last_rx_ch = chan_id;
+
+#if (PICC_DIAG_RECORD_ENABLE == 1U)
+    /* Record received data to diagnostic buffer (excludes heartbeat) */
+    PICC_DiagRecordAdd(&g_diagRecordRx, (const uint8 *)buf, size);
+#endif
 
     /* Construct message */
     msg.instance  = instance;
@@ -313,6 +467,12 @@ void PICC_PreOS_Init(void)
     g_appData.error_file  = NULL;
     g_appData.error_line  = 0;
     g_appData.link_state  = (uint8)PICC_LINK_STATE_DISCONNECTED;
+
+#if (PICC_DIAG_RECORD_ENABLE == 1U)
+    /* Initialize diagnostic record buffers */
+    PICC_DiagRecordInit(&g_diagRecordRx);
+    PICC_DiagRecordInit(&g_diagRecordTx);
+#endif
 
     /* ========================================================================
      * 3. Initialize IPCF driver

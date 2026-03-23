@@ -25,6 +25,9 @@ extern "C"{
  *                                         Macro Definitions
  *==================================================================================================*/
 
+/** Enable diagnostic data recording feature (for testing only) */
+#define PICC_DIAG_RECORD_ENABLE         (1U)
+
 /** Error handling macro, auto passes file and line number (used by PICC module) */
 #define HANDLE_ERROR(err)       handle_error((err), __FILE__, __LINE__)
 
@@ -53,12 +56,22 @@ void App_Rx_Msg_10ms_Task(void *params);
 
 /**
  * @brief Error handling function
- * 
+ *
  * @param[in] error Error code
  * @param[in] file  File where error occurred
  * @param[in] line  Line where error occurred
  */
 void handle_error(sint8 error, const char *file, int line);
+
+#if (PICC_DIAG_RECORD_ENABLE == 1U)
+/**
+ * @brief Add TX data to diagnostic record buffer
+ *
+ * @param[in] data    Data buffer to record
+ * @param[in] len     Data length
+ */
+void PICC_DiagRecordAddTx(const uint8 *data, uint32 len);
+#endif
 
 #if defined(__cplusplus)
 }
