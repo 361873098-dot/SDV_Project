@@ -21,7 +21,7 @@ PICC_MethodResponse(PICC_APP_PWR, 2U, sessionId, 0x00, rspData, 1);
 ```
 
 **优势**：
-- 参数数量从 7-8 个减少到 4-5 个
+- 参数数量从 7-8 个减少到 5-6 个
 - 不需要应用层维护 ID 常量，只需知道自己的 `PICC_APP_xxx` 枚举
 - 消除了传错 channelId 或 instanceId 的可能性
 - `PICC_Init()` 配置保持不变，完全向后兼容
@@ -76,18 +76,54 @@ PICC_MethodResponse(PICC_APP_PWR, 2U, sessionId, 0x00, rspData, 1);
 
 ## 3. PICC_Init 配置说明
 
-### 3.1 PICC_AppConfig_t 结构体
+### 3.1 前置条件
+
+在调用 `PICC_Init()` 之前，必须先调用 `PICC_PreOS_Init()`。该函数在 `main()` 函数中、FreeRTOS 调度器启动之前调用，用于初始化 IPCF 驱动和 PICC 基础设施。
+
+```c
+int main(void)
+{
+    /* ... 其他初始化 ... */
+
+    PICC_PreOS_Init();  /* 必须在 PICC_Init() 之前调用 */
+
+    vTaskStartScheduler();  /* 启动 FreeRTOS 调度器 */
+    /* ... */
+}
+```
+
+### 3.2 PICC_AppConfig_t 结构体
 
 ```c
 typedef struct {
-    uint8                    localId;           /* 本地 ID */
-    uint8                    remoteId;          /* 对端 ID */
-    PICC_Role_e              role;              /* Server 或 Client */
+    uint8                    localId;           /* 本地 ID (Server 为 ProviderID, Client 为 ConsumerID) */
+    uint8                    remoteId;          /* 对端 ID (对端的 ProviderID 或 ConsumerID) */
+    PICC_Role_e              role;              /* PICC_ROLE_SERVER 或 PICC_ROLE_CLIENT */
     uint8                    channelId;         /* IPCF 通道号 (1 或 2) */
     PICC_LinkStateCallback_t linkStateCallback; /* 链路状态回调（可为 NULL） */
     PICC_MethodCallback_t    methodHandler;     /* Method 请求回调（可为 NULL） */
     PICC_EventCallback_t     eventHandler;      /* Event 通知回调（可为 NULL） */
 } PICC_AppConfig_t;
+```
+
+### 3.3 应用索引枚举（PICC_AppIndex_e）
+
+每个应用模块在初始化时需要指定一个唯一的应用索引：
+
+```c
+typedef enum {
+    PICC_APP_PWR      = 0U,   /* 电源管理    (ProviderID: 0x01) */
+    PICC_APP_OTA      = 1U,   /* OTA         (ProviderID: 0x11) */
+    PICC_APP_HEALTH   = 2U,   /* 健康管理    (ProviderID: 0x21) */
+    PICC_APP_COMM     = 3U,   /* 通信管理    (ProviderID: 0x31) */
+    PICC_APP_STORAGE  = 4U,   /* 存储模块    (ProviderID: 0x41) */
+    PICC_APP_DIAG     = 5U,   /* 诊断模块    (ProviderID: 0x51) */
+    PICC_APP_TIMESYNC = 6U,   /* 时间同步    (ProviderID: 0x61) */
+    PICC_APP_SOA      = 7U,   /* SOA 模块    (ProviderID: 0x71) */
+    PICC_APP_RSV0     = 8U,   /* 预留 0 */
+    PICC_APP_RSV1     = 9U,   /* 预留 1 */
+    PICC_APP_MAX      = 10U   /* 最大数量（数组大小） */
+} PICC_AppIndex_e;
 ```
 
 ### 3.2 三个回调字段说明
@@ -158,32 +194,42 @@ sint8 PICC_GetEventData(appIndex, eventId, data, maxLen, &len, cbResult, &cbLen)
 void Pwsm_Init(void)
 {
     static const PICC_AppConfig_t cfg = {
-        .localId = 0x01, .remoteId = 0x06,
-        .role = PICC_ROLE_SERVER, .channelId = 2U,
+        .localId           = PWR_PROVIDER_ID,     /* 0x01 */
+        .remoteId          = PWR_CONSUMER_ID,     /* 0x06 */
+        .role              = PICC_ROLE_SERVER,
+        .channelId         = PWR_CHANNEL_ID,      /* 2 */
         .linkStateCallback = NULL,
-        .methodHandler     = NULL,
-        .eventHandler      = NULL
+        .methodHandler     = NULL,  /* 纯轮询模式，无需回调 */
+        .eventHandler      = NULL   /* 纯轮询模式，无需回调 */
     };
+
     (void)PICC_Init(PICC_APP_PWR, &cfg);
 }
 
-void Pwsm_Main(void)  /* 10ms 周期任务 */
+void Pwsm_CommEvent(void)  /* 10ms 周期任务 */
 {
-    uint8 buf[8]; uint16 len;
+    uint8 buf[8];
+    uint16 len;
 
-    if (PICC_GetLinkState(2U) != PICC_LINK_STATE_CONNECTED) return;
+    /* 【发送通知：M ➡ A】（EVENT 发送单向通知） */
+    uint8 payload[1] = { (uint8)PWR_STATE_STANDBY };
+    (void)PICC_SendEvent(PICC_APP_PWR, PWR_EVENT_STATE_NOTIFY,
+                         payload, 1U, PICC_EVENT_WITH_ACK);
 
     /* 【提取请求：A ➡ M】（METHOD 场景B：M核是 Server 获取请求） */
     /* 没注册回调，不需要 cbResult，后两个参数传 NULL, NULL */
-    if (PICC_GetMethodData(PICC_APP_PWR, 2U, buf, sizeof(buf), &len,
+    if (PICC_GetMethodData(PICC_APP_PWR, PWR_METHOD_STATE_ACK,
+                           buf, sizeof(buf), &len,
                            NULL, NULL) == PICC_E_OK) {
-        uint8 ackState = buf[0];
-        /* 第1步：处理收到的 Method Request (ID=2) 的业务逻辑... */
-        
-        /* 【反馈应答：M ➡ A】（METHOD 场景B：M核必须回复 Response 形成 RPC 闭环！） */
-        /* ⚠️ 防呆提示：因为您没注册回调函数，所以必须由您手动调用 MethodResponse 发送回包结束本次会话！ */
-        uint8 rspPayload[1] = { 0x00 }; /* 假设 0x00 表示处理成功 */
-        (void)PICC_MethodResponse(PICC_APP_PWR, 2U, 0U /* 假设sessionId为0 */, 0x00, rspPayload, 1);
+        if (len >= 2U && buf[0] == PWR_CORE_A) {
+            /* 处理收到的 Method Request 的业务逻辑... */
+
+            /* 【反馈应答：M ➡ A】（METHOD 场景B：M核必须回复 Response 形成 RPC 闭环！） */
+            /* ⚠️ 防呆提示：因为没注册回调函数，所以必须手动调用 MethodResponse 发送回包结束本次会话！ */
+            uint8 rspPayload[1] = { 0x00 }; /* 0x00 表示处理成功 */
+            (void)PICC_MethodResponse(PICC_APP_PWR, PWR_METHOD_STATE_ACK,
+                                      0U /* sessionId */, 0x00, rspPayload, 1);
+        }
     }
 }
 ```
@@ -197,7 +243,7 @@ static void TimeSync_EventHandler(uint8 providerId, uint8 eventId,
                                    const uint8 *data, uint16 len,
                                    uint8 *cbResult, uint16 *cbResultLen)
 {
-    if (eventId == 0x01U) {
+    if (eventId == TIMESYNC_EVENT_SYNC_REQUEST) {
         /* [即时操作] 在数据到达微秒级瞬间，采集本地机器时间戳 */
         uint32 ts = STM_GetCounter();
         cbResult[0] = (uint8)(ts >> 24U);
@@ -211,11 +257,13 @@ static void TimeSync_EventHandler(uint8 providerId, uint8 eventId,
 void TimeSync_Init(void)
 {
     static const PICC_AppConfig_t cfg = {
-        .localId = 0x61, .remoteId = 0x66,
-        .role = PICC_ROLE_CLIENT, .channelId = 1U,
+        .localId           = TIMESYNC_PROVIDER_ID,   /* 0x61 */
+        .remoteId          = TIMESYNC_CONSUMER_ID,   /* 0x66 */
+        .role              = PICC_ROLE_CLIENT,
+        .channelId         = TIMESYNC_CHANNEL_ID,    /* 1 */
         .linkStateCallback = NULL,
         .methodHandler     = NULL,
-        .eventHandler      = TimeSync_EventHandler
+        .eventHandler      = TimeSync_EventHandler   /* 注册即时回调 */
     };
     (void)PICC_Init(PICC_APP_TIMESYNC, &cfg);
 }
@@ -227,7 +275,7 @@ void TimeSync_Main(void)  /* 10ms 周期任务 */
 
     /* 【提取通知：A ➡ M】（EVENT 接收通知） */
     /* 只需这 1 个 API（无需查全局变量），就能同时提取远端包裹和刚才顺手记录的本地时间戳！ */
-    if (PICC_GetEventData(PICC_APP_TIMESYNC, 0x01U,
+    if (PICC_GetEventData(PICC_APP_TIMESYNC, TIMESYNC_EVENT_SYNC_REQUEST,
                           remoteData, sizeof(remoteData), &remoteLen,
                           cbResult, &cbLen) == PICC_E_OK)
     {
@@ -235,14 +283,15 @@ void TimeSync_Main(void)  /* 10ms 周期任务 */
                          ((uint32)cbResult[1] << 16U) |
                          ((uint32)cbResult[2] <<  8U) |
                          ((uint32)cbResult[3]);
-                         
+
         /* 有了 A核数据(remoteData) + 回调记录的即时本地时间戳(localTs)，即可开始对齐计算 */
         TimeSync_CalculateOffset(localTs, remoteData, remoteLen);
-        
+
         /* 【主动发送通知：M ➡ A】（EVENT 发送单向通知） */
         /* 同步计算完成后，如果想立刻反向报喜给 A核，因为是 EVENT，发出去就不管了 */
         uint8 syncDoneMsg[1] = { 0x01 };
-        (void)PICC_SendEvent(PICC_APP_TIMESYNC, 0x02U, syncDoneMsg, 1, PICC_EVENT_WITHOUT_ACK);
+        (void)PICC_SendEvent(PICC_APP_TIMESYNC, TIMESYNC_EVENT_SYNC_DONE,
+                             syncDoneMsg, 1, PICC_EVENT_WITHOUT_ACK);
     }
 }
 ```
@@ -255,10 +304,10 @@ static uint8 OTA_MethodHandler(uint8 consumerId, uint8 methodId,
                                 uint8 *rspData, uint16 *rspLen,
                                 uint8 *cbResult, uint16 *cbResultLen)
 {
-    if (methodId == 0x03U) {
+    if (methodId == OTA_METHOD_FLASH_WRITE) {
         /* [即刻进行擦写操作] */
         sint8 ret = Flash_Write(reqData, reqLen);
-        
+
         /* 【反馈应答准备：M ➡ A】（METHOD 场景B：自动闭环） */
         /* ⚠️ 高级用法防呆提示：由于您在此注册了 Callback 函数！ */
         /* 驱动底层在拿到下面的 rspData 和 rspLen 赋值后，会【全自动调用 PICC_MethodResponse()】替您擦屁股！ */
@@ -278,10 +327,12 @@ static uint8 OTA_MethodHandler(uint8 consumerId, uint8 methodId,
 void OTA_Init(void)
 {
     static const PICC_AppConfig_t cfg = {
-        .localId = 0x11, .remoteId = 0x16,
-        .role = PICC_ROLE_SERVER, .channelId = 2U,
+        .localId           = OTA_PROVIDER_ID,     /* 0x11 */
+        .remoteId          = OTA_CONSUMER_ID,     /* 0x16 */
+        .role              = PICC_ROLE_SERVER,
+        .channelId         = OTA_CHANNEL_ID,      /* 2 */
         .linkStateCallback = NULL,
-        .methodHandler     = OTA_MethodHandler, /* <--- 在这里注册回调！ */
+        .methodHandler     = OTA_MethodHandler,   /* <--- 在这里注册回调！ */
         .eventHandler      = NULL
     };
     (void)PICC_Init(PICC_APP_OTA, &cfg);
@@ -295,11 +346,13 @@ void OTA_Main(void)
     /* 【主动请求：M ➡ A】（METHOD 场景A：M核主动扮演 Client) */
     /* 例如如果 M核 OTA 觉得该下一包了，可以随时发起 MethodRequest 要更新数据 */
     // uint8 reqCmd[2] = {0x00, 0x01};
-    // (void)PICC_MethodRequest(PICC_APP_OTA, 0x02U, reqCmd, 2U, PICC_METHOD_WITH_RESPONSE);
+    // (void)PICC_MethodRequest(PICC_APP_OTA, OTA_METHOD_REQUEST_DATA,
+    //                          reqCmd, 2U, PICC_METHOD_WITH_RESPONSE);
 
     /* 【提取请求（已自动回复妥当）：A ➡ M】（METHOD 场景B：获取通知和回调果实） */
     /* 周期任务完全省去写全局变量，在这里直接检查刚才瞬间的回调有没有完成烧写的块 */
-    if (PICC_GetMethodData(PICC_APP_OTA, 0x03U, data, sizeof(data), &len,
+    if (PICC_GetMethodData(PICC_APP_OTA, OTA_METHOD_FLASH_WRITE,
+                           data, sizeof(data), &len,
                            cbResult, &cbLen) == PICC_E_OK) {
         uint16 writtenBytes = ((uint16)cbResult[0] << 8U) | cbResult[1];
         /* 记录 writtenBytes，更新进度条等... */

@@ -38,6 +38,8 @@ extern "C" {
 
 #include "picc_api.h"
 #include "picc_mailbox.h"
+#include "picc_service.h"
+#include "picc_link.h"
 #include "ipcf_Ip_Cfg_Defines.h"  /* For IPCF_INSTANCE0 */
 
 /*==================================================================================================
