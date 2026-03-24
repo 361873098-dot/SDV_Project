@@ -121,3 +121,13 @@ Method/Event ID： 2  A-->M   01 02 06 00 07 00 00 02 03 04
 Method/Event ID： 8  A-->M   01 08 06 00 07 00 00 01 03
 Method/Event ID： 4  M-->A   01 04 06 02 08 00 00 02 03 03
 Method/Event ID： 11 A-->M   01 0B 06 00 07 00 00 02 03 00
+
+IPCF通道：例如：10ms周期发送或者消息堆叠达到IPCF驱动配置的最大buffer大小左右（包含协议头）发送。核间通信的应用在通信时需要确认ProviderID和ConsumerID，ProviderID和ConsumerID公用1-254这个范围。在同一个应用中可以存在多个Provider和Consumer，但需要注意这些角色的ID不允许重复。一个Provider角色可以为多个Consumer角色服务，但一个Consumer角色只允许使用一个Provider提供的服务，即Provider1可以对应Consumer2，Consumer3，但Consumer3不能再对应Provider2。每个Provider角色可以提供多种服务，如Event，Method服务，这些Event或者Method也需要分配MethodID，每个Provider下的MethodID取值范围为1-254，不同的Provider可以有相同MethodID的服务。ProviderID和ConsumerID均在构造函数中传入，具体可参考API文档说明。
+
+ Event：一个单向的数据传输，用于Server主动向Client发布信息。协议层根据该客户端是否订阅(M核不支持订阅)，确定消息是否转发给Client。Method：服务端提供Method服务。Method服务分为Request和Response消息，Request用于Client端向Server端发送调用进程/函数/子程序的请求，而Response则是Method执行端完成动作后向调用方回复的调用结果。Method当前支持REQUEST，REQUEST_NO_RETURN_WITH_ACK，REQUEST_NO_RETURN_WITHOUT_ACK类型（ACK由协议层完成，应用层无需关注）以上为新的需求，
+ 
+	不带ACK 的event 方式发送 resquest 的Response ，可以不用等待这个Session ID；可以异步处理这个Session id ,
+
+	由于M核心的实时性，无法进行同步等待，所以：
+1	M核发送Request 之后，需要使用异步的方式去获取A核返回RESPONSE消息中的seesion id进行匹配从而对获取信息；
+2	M核发送EVENT 的时候，只需要发不带ACK的EVENT，如果应用层需要M核发带ACK的EVENT，那么M核对这个EVENT 的ACK不做处理；
