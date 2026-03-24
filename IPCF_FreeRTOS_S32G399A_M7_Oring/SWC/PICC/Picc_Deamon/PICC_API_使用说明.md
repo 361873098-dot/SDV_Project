@@ -1,23 +1,12 @@
 # PICC API 使用说明
 
-## 📌 v2.0 重要简化更新
 
-从 v2.0 版本开始，所有发送 API 已大幅简化：
 
-**之前（v1.x）**：
-```c
-// 需要手动传递 7-8 个参数，包括 providerId, consumerId, instanceId, channelId
-PICC_SendEvent(0x61, 0x02U, 0x66, data, len, PICC_EVENT_WITHOUT_ACK, 1U);
-PICC_MethodRequest(0x16, 0x02U, data, 2U, PICC_METHOD_WITH_RESPONSE, 0, 2U);
-PICC_MethodResponse(0x06, 2U, sessionId, 0x00, rspData, 1, 0, 2U);
-```
-
-**现在（v2.0）**：
 ```c
 // 只需传递 appIndex，驱动自动从 PICC_Init() 配置中获取 ID 和 channelId
 PICC_SendEvent(PICC_APP_TIMESYNC, 0x02U, data, len, PICC_EVENT_WITHOUT_ACK);
-PICC_MethodRequest(PICC_APP_OTA, 0x02U, data, 2U, PICC_METHOD_WITH_RESPONSE);
-PICC_MethodResponse(PICC_APP_PWR, 2U, sessionId, 0x00, rspData, 1);
+uint8 sid = PICC_MethodRequest(PICC_APP_OTA, 0x02U, data, 2U, PICC_METHOD_WITH_RESPONSE);
+sint8 ret = PICC_GetResponseData(PICC_APP_OTA, 0x02U, sid, &retCode, rspData, sizeof(rspData), &len, NULL, NULL);
 ```
 
 **优势**：
@@ -36,14 +25,16 @@ PICC_MethodResponse(PICC_APP_PWR, 2U, sessionId, 0x00, rspData, 1);
 **特性**：发即忘（类似 UDP 广播），发送方无需对方回复处理结果（无需 Response）。
 *   【**发送方向**：M核 ➡ A核】 (`M -> A`)
     *   **动作**：M核主动调用 `PICC_SendEvent()`。
+    *   ⚠️ **核心协议约束 (Rule 3)**：由于 M 核的实时性要求，M 核发送 EVENT 时强烈建议只发送**不带 ACK 的 EVENT (`WITHOUT_ACK`)**。如果应用层强行传入 `WITH_ACK`，底层协议会将包发给 A 核，但**绝对不会去处理、也绝不会去等待 A 核回复的 EVENT_ACK 确认包**。底层在收到 EVENT_ACK 时会直接静默丢弃。
 *   【**接收方向**：A核 ➡ M核】 (`A -> M`)
     *   **动作**：M核通过初始化时注册的 `.eventHandler` 捕获即时硬中断通知；**或者**在周期任务中主动轮询 `PICC_GetEventData()` 读取。
 
 ### 2) METHOD 协议 (双向请求 / Request-Response)
 **特性**：一问一答（类似 RPC），Client 提问发起 Request，Server 作答返回 Response。
 *   **情形 A：M核是 Client（M核提问，A核作答）**
-    *   【**发起请求**：M核 ➡ A核】 (`M -> A`)：M核主动调用 `PICC_MethodRequest()` 发送指令。
+    *   【**发起请求**：M核 ➡ A核】 (`M -> A`)：M核主动调用 `PICC_MethodRequest()` 发送指令，并且**函数会立即返回一个 `sessionId`**（绝不阻塞等待）。
     *   【**提取应答**：A核 ➡ M核】 (`A -> M`)：M核在周期任务中轮询 `PICC_GetResponseData()` 收割 A核的处理结果。
+    *   ⚠️ **核心协议约束 (Rule 3)**：由于 M 核心无法进行同步阻塞等待，获取 Response 必须是**异步的方式**。调用 `PICC_GetResponseData()` 时**必须传入之前那个 `sessionId` 进行精准匹配**，防止连续发多次相同请求时把不同批次的回包搞混！
 *   **情形 B：M核是 Server（A核提问，M核作答）**
     *   【**提取请求**：A核 ➡ M核】 (`A -> M`)：M核通过初始化时注册的 `.methodHandler` 捕获 A核的瞬间请求；**或者**在周期任务中轮询 `PICC_GetMethodData()` 拿到 A核发来的指令数据。
     *   【**反馈应答**：M核 ➡ A核】 (`M -> A`)：M核在处理完业务后，必须主动调用 `PICC_MethodResponse()` 给 A核擦屁股回包以结束会话。
@@ -100,7 +91,6 @@ typedef struct {
     uint8                    remoteId;          /* 对端 ID (对端的 ProviderID 或 ConsumerID) */
     PICC_Role_e              role;              /* PICC_ROLE_SERVER 或 PICC_ROLE_CLIENT */
     uint8                    channelId;         /* IPCF 通道号 (1 或 2) */
-    PICC_LinkStateCallback_t linkStateCallback; /* 链路状态回调（可为 NULL） */
     PICC_MethodCallback_t    methodHandler;     /* Method 请求回调（可为 NULL） */
     PICC_EventCallback_t     eventHandler;      /* Event 通知回调（可为 NULL） */
 } PICC_AppConfig_t;
@@ -126,22 +116,11 @@ typedef enum {
 } PICC_AppIndex_e;
 ```
 
-### 3.2 三个回调字段说明
+### 3.2 两个回调字段说明
 
-三个回调字段均为**可选**。传 `NULL` 表示使用**纯轮询模式**，传函数指针表示使用**即时回调模式**。  
+两个回调字段均为**可选**。传 `NULL` 表示使用**纯轮询模式**，传函数指针表示使用**即时回调模式**。  
 **两种模式可以无缝结合**：邮箱始终存储 A 核原始数据，如果注册了回调，回调产生的结果也会自动存入邮箱。  
 **应用层统一通过 `PICC_Get*Data()` 获取全部数据**（既包含 A 核请求/事件原始数据，也包含回调执行后输出的结果 `cbResult`）。
-
-#### linkStateCallback（链路状态回调）
-
-| 传值 | 行为 |
-|------|------|
-| `NULL` | 通过 `PICC_GetLinkState()` 轮询 |
-| 函数指针 | 链路变化时立刻调用 |
-
-```c
-typedef void (*PICC_LinkStateCallback_t)(uint8 remoteId, PICC_LinkState_e state);
-```
 
 #### methodHandler（Method 请求回调）
 
@@ -174,9 +153,54 @@ typedef void (*PICC_EventCallback_t)(uint8 providerId, uint8 eventId,
 
 ```c
 /* 最后两个参数用于输出本次接收带来的"回调产生的结果（cbResult）"。如果应用不需要或者没注册该类事件的回调，传 NULL 即可 */
+/* 注意：PICC_GetResponseData 必须传入 sessionId 参数来进行异步 Response 匹配。传 0 为不匹配 session（高并发下不推荐）。*/
 sint8 PICC_GetMethodData(appIndex, methodId, data, maxLen, &len, cbResult, &cbLen);
-sint8 PICC_GetResponseData(appIndex, methodId, &retCode, data, maxLen, &len, cbResult, &cbLen);
+sint8 PICC_GetResponseData(appIndex, methodId, sessionId, &retCode, data, maxLen, &len, cbResult, &cbLen);
 sint8 PICC_GetEventData(appIndex, eventId, data, maxLen, &len, cbResult, &cbLen);
+PICC_LinkState_e PICC_GetLinkState(channelId);
+```
+
+`PICC_GetLinkState()` 是公开的 polling API，用于按通道查询当前链路状态：
+
+1. `PICC_LINK_STATE_DISCONNECTED`
+2. `PICC_LINK_STATE_CONNECTING`
+3. `PICC_LINK_STATE_CONNECTED`
+
+说明：
+
+1. 发送类 API 内部已经自动检查链路状态，未连接时会直接返回失败。
+2. 因此应用层通常不需要在每次发送前自行检查链路。
+3. 只有当业务确实需要根据链路状态做自己的流程分支时，才需要调用 `PICC_GetLinkState()`。
+
+示例：
+
+```c
+PICC_LinkState_e linkState;
+
+linkState = PICC_GetLinkState(PWR_CHANNEL_ID);
+
+if (linkState == PICC_LINK_STATE_CONNECTED) {
+    /* 链路已建立，可继续执行依赖对端在线的业务逻辑 */
+} else if (linkState == PICC_LINK_STATE_CONNECTING) {
+    /* 链路正在建立，通常保持等待或进入重试/降级状态 */
+} else {
+    /* PICC_LINK_STATE_DISCONNECTED */
+    /* 链路未建立，可跳过本周期发送或记录本地状态 */
+}
+```
+
+上面这个示例适用于“业务流程分支控制”。如果只是单纯发送报文，则通常不需要先调用它，例如：
+
+```c
+sint8 ret;
+uint8 payload[1] = { (uint8)PWR_STATE_STANDBY };
+
+ret = PICC_SendEvent(PICC_APP_PWR, PWR_EVENT_STATE_NOTIFY,
+                     payload, 1U, PICC_EVENT_WITH_ACK);
+
+if (ret == PICC_E_NOT_CONNECTED) {
+    /* 发送接口内部已经完成链路检查，这里按失败处理即可 */
+}
 ```
 
 ---
@@ -198,7 +222,6 @@ void Pwsm_Init(void)
         .remoteId          = PWR_CONSUMER_ID,     /* 0x06 */
         .role              = PICC_ROLE_SERVER,
         .channelId         = PWR_CHANNEL_ID,      /* 2 */
-        .linkStateCallback = NULL,
         .methodHandler     = NULL,  /* 纯轮询模式，无需回调 */
         .eventHandler      = NULL   /* 纯轮询模式，无需回调 */
     };
@@ -234,7 +257,29 @@ void Pwsm_CommEvent(void)  /* 10ms 周期任务 */
 }
 ```
 
-### 4.2 场景二：Event 回调 + 统一读取（时钟同步时间戳模型）
+### 4.2 场景二：链路状态 polling（业务按需查询）
+
+如果某个业务模块确实需要根据链路状态做本地分支控制，可以直接查询 `PICC_GetLinkState()`。
+
+```c
+void Comm_Main(void)
+{
+    if (PICC_GetLinkState(COMM_CHANNEL_ID) != PICC_LINK_STATE_CONNECTED) {
+        /* 链路未建立时，不发业务报文或进入降级处理 */
+        return;
+    }
+
+    /* 只有链路已连接时才执行业务收发 */
+}
+```
+
+这个示例体现的原则是：
+
+1. 链路状态通过 polling API 显式查询。
+2. 发送 API 内部已经做链路检查，因此这里只在业务需要分支控制时才调用。
+3. 这样可以保持 `PICC_AppConfig_t` 简洁，不为未使用的回调保留配置位。
+
+### 4.3 场景三：Event 回调 + 统一读取（时钟同步时间戳模型）
 
 回调中立刻采集硬件定时器戳写入 `cbResult`，随后周期任务无缝通过 `PICC_GetEventData()` 一并拿到 A 核数据和刚才记录的硬件回调结果（本地时间戳）。
 
@@ -261,7 +306,6 @@ void TimeSync_Init(void)
         .remoteId          = TIMESYNC_CONSUMER_ID,   /* 0x66 */
         .role              = PICC_ROLE_CLIENT,
         .channelId         = TIMESYNC_CHANNEL_ID,    /* 1 */
-        .linkStateCallback = NULL,
         .methodHandler     = NULL,
         .eventHandler      = TimeSync_EventHandler   /* 注册即时回调 */
     };
@@ -296,7 +340,7 @@ void TimeSync_Main(void)  /* 10ms 周期任务 */
 }
 ```
 
-### 4.3 场景三：Method 回调 + 统一读取（OTA 写闪存模型）
+### 4.4 场景四：Method 回调 + 统一读取（OTA 写闪存模型）
 
 ```c
 static uint8 OTA_MethodHandler(uint8 consumerId, uint8 methodId,
@@ -331,7 +375,6 @@ void OTA_Init(void)
         .remoteId          = OTA_CONSUMER_ID,     /* 0x16 */
         .role              = PICC_ROLE_SERVER,
         .channelId         = OTA_CHANNEL_ID,      /* 2 */
-        .linkStateCallback = NULL,
         .methodHandler     = OTA_MethodHandler,   /* <--- 在这里注册回调！ */
         .eventHandler      = NULL
     };
@@ -340,14 +383,27 @@ void OTA_Init(void)
 
 void OTA_Main(void)
 {
+    static uint8 mySessionId = 0U; /* 保存异步调用的会话 ID */
     uint8 data[32]; uint16 len;
+    uint8 retCode;
     uint8 cbResult[8]; uint16 cbLen;
 
     /* 【主动请求：M ➡ A】（METHOD 场景A：M核主动扮演 Client) */
     /* 例如如果 M核 OTA 觉得该下一包了，可以随时发起 MethodRequest 要更新数据 */
-    // uint8 reqCmd[2] = {0x00, 0x01};
-    // (void)PICC_MethodRequest(PICC_APP_OTA, OTA_METHOD_REQUEST_DATA,
-    //                          reqCmd, 2U, PICC_METHOD_WITH_RESPONSE);
+    // if (需要要数据) {
+    //     uint8 reqCmd[2] = {0x00, 0x01};
+    //     mySessionId = PICC_MethodRequest(PICC_APP_OTA, OTA_METHOD_REQUEST_DATA,
+    //                                      reqCmd, 2U, PICC_METHOD_WITH_RESPONSE);
+    // }
+
+    /* 如果发出了请求，这里轮询获取 A 核的 Response。⚠️由于是异步匹配，必须传入 mySessionId！ */
+    // if (mySessionId != 0U) {
+    //     if (PICC_GetResponseData(PICC_APP_OTA, OTA_METHOD_REQUEST_DATA, mySessionId,
+    //                              &retCode, data, sizeof(data), &len, NULL, NULL) == PICC_E_OK) {
+    //         /* 收到回复，清理 sessionId，处理数据 */
+    //         mySessionId = 0U;
+    //     }
+    // }
 
     /* 【提取请求（已自动回复妥当）：A ➡ M】（METHOD 场景B：获取通知和回调果实） */
     /* 周期任务完全省去写全局变量，在这里直接检查刚才瞬间的回调有没有完成烧写的块 */
@@ -359,6 +415,74 @@ void OTA_Main(void)
     }
 }
 ```
+
+### 4.5 场景五：异步并发 Method 调用与精准 Session 匹配（高阶通信）
+
+根据 IPCF 协议 Rule 3 要求，M 核心无法进行同步等待，因此当 M 核主动扮演 Client 向 A 核索取数据时（发 Request 等待 Response），要求纯异步闭环。
+
+如果您在业务上需要**并发连续发出相同的 Method 提取指令**，就可以使用底层最新的 `SessionID` 精巧隔离功能来完美匹配，互不串联。示例步骤与详细原理解析如下：
+
+```c
+#define METHOD_GET_CHUNK 0x03U
+
+/* 全局或静态变量，用于记录正在飞行的 Request Session */
+static uint8 session_chunk1 = 0U;
+static uint8 session_chunk2 = 0U;
+
+void HighLevelComm_Main(void) /* 10ms 周期任务 */
+{
+    uint8 data[32]; uint16 len;
+    uint8 retCode;
+    
+    /* ---------------------------------------------------------
+     * 1. 连续发起两笔并发请求 (无需等待第一笔回来即可发第二笔)
+     * --------------------------------------------------------- */
+    if (/* 当业务需要并发索取分片数据时 */) {
+        uint8 req1[1] = { 0x01 }; /* 想要第 1 块 */
+        uint8 req2[1] = { 0x02 }; /* 想要第 2 块 */
+        
+        /* 🚀 调用 API 时，立刻记录下属于这次请求的唯一身份 ID (SessionID) */
+        session_chunk1 = PICC_MethodRequest(PICC_APP_COMM, METHOD_GET_CHUNK, 
+                                            req1, 1U, PICC_METHOD_WITH_RESPONSE);
+                                            
+        session_chunk2 = PICC_MethodRequest(PICC_APP_COMM, METHOD_GET_CHUNK, 
+                                            req2, 1U, PICC_METHOD_WITH_RESPONSE);
+    }
+    
+    /* ---------------------------------------------------------
+     * 2. 异步轮询回收 Response (通过传入 SessionID 精确提取)
+     * --------------------------------------------------------- */
+    
+    /* 尝试捞取 Chunk 1 的答卷 */
+    if (session_chunk1 != 0U) {
+        if (PICC_GetResponseData(PICC_APP_COMM, METHOD_GET_CHUNK, session_chunk1,
+                                 &retCode, data, sizeof(data), &len, NULL, NULL) == PICC_E_OK) {
+            /* 提取成功！底层已经为你卡死了，这绝对是 Chunk1 的包裹对象，不可能是 2 的 */
+            /* 在此进行该分片的业务解包处理 */
+            session_chunk1 = 0U; /* 标记提取完成 */
+        }
+    }
+
+    /* 尝试捞取 Chunk 2 的答卷 */
+    if (session_chunk2 != 0U) {
+        if (PICC_GetResponseData(PICC_APP_COMM, METHOD_GET_CHUNK, session_chunk2,
+                                 &retCode, data, sizeof(data), &len, NULL, NULL) == PICC_E_OK) {
+            /* 提取成功！ */
+            /* 业务处理 */
+            session_chunk2 = 0U; /* 标记提取完成 */
+        }
+    }
+}
+```
+
+>**💡 底层设计逻辑与协议符合度宣贯：**
+>
+> 1. **彻底解决死锁和越权（ Overwrite 防护机制 ）**
+>    旧架构下，信箱在接收别人投递的 Response 时，只会判断“这封信是不是寄给这个 MethodID 的”。当你同周期连发 2 个完全相同的 `METHOD_GET_CHUNK` 请求后，A 核如果迅速将这两个应答接连传回，第二个就会瞬间覆盖第一个（张冠李戴）。
+>    而在全新的规则下，接收中断会把 `(MethodID + SessionID)` **当做一个硬性的复合密钥（Composite Key）来审查**，它使得这两封长得一模一样的信终于被分别装进了专属的槽位，杜绝了信息丢失问题！
+> 2. **完全解耦（ Asynchronous Polling Extraction ）**
+>    提取阶段也严防死守。必须出示 `session_chunk1` 和 `session_chunk2` 作为入参提取。由于系统维护了一个全局自增回滚计数器（0x01 - 0xFF），这意味着不论在何等极端的高并发恶劣环境下，M 核对这些包裹的回收都做到了完美的“实名制查收”。
+>    这种非阻塞设计满足了控制台内核**极高优先级硬排队的严苛耗时要求**。
 
 ---
 

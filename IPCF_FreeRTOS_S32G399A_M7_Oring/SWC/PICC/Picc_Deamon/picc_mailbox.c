@@ -38,6 +38,7 @@ extern "C" {
 typedef struct {
     boolean  ready;                         /**< New data available */
     uint8    msgId;                         /**< methodId or eventId */
+    uint8    sessionId;                     /**< Session ID (for async Response matching) */
     uint8    returnCode;                    /**< Only for Response type */
     uint8    data[PICC_RX_MAX_DATA_LEN];    /**< Payload data copy */
     uint16   dataLen;                       /**< Actual payload length */
@@ -96,14 +97,17 @@ static void PICC_InitContexts(void)
             for (s = 0U; s < PICC_RX_MAX_SLOTS; s++) {
                 g_rxMailbox[a].method[s].ready = FALSE;
                 g_rxMailbox[a].method[s].msgId = 0xFFU;
+                g_rxMailbox[a].method[s].sessionId = 0U;
                 g_rxMailbox[a].method[s].dataLen = 0U;
                 g_rxMailbox[a].method[s].cbResultLen = 0U;
                 g_rxMailbox[a].response[s].ready = FALSE;
                 g_rxMailbox[a].response[s].msgId = 0xFFU;
+                g_rxMailbox[a].response[s].sessionId = 0U;
                 g_rxMailbox[a].response[s].dataLen = 0U;
                 g_rxMailbox[a].response[s].cbResultLen = 0U;
                 g_rxMailbox[a].event[s].ready = FALSE;
                 g_rxMailbox[a].event[s].msgId = 0xFFU;
+                g_rxMailbox[a].event[s].sessionId = 0U;
                 g_rxMailbox[a].event[s].dataLen = 0U;
                 g_rxMailbox[a].event[s].cbResultLen = 0U;
             }
@@ -173,6 +177,7 @@ static void PICC_StoreToSlot(PICC_RxSlot_t *slots, uint8 msgId, uint8 returnCode
 
     copyLen = (payloadLen > PICC_RX_MAX_DATA_LEN) ? PICC_RX_MAX_DATA_LEN : payloadLen;
     slots[freeSlot].msgId = msgId;
+    slots[freeSlot].sessionId = 0U;    /* Default: no session (Method/Event use msgId only) */
     slots[freeSlot].returnCode = returnCode;
     for (s = 0U; s < copyLen; s++) {
         slots[freeSlot].data[s] = payload[s];
@@ -183,10 +188,67 @@ static void PICC_StoreToSlot(PICC_RxSlot_t *slots, uint8 msgId, uint8 returnCode
 }
 
 /**
- * @brief Read data from a slot (by msgId). If found and ready, copies data + cbResult and clears flag.
+ * @brief Store Response data into a slot array using (msgId + sessionId) as composite key.
+ *
+ * Unlike PICC_StoreToSlot which matches only by msgId (suitable for Method request
+ * and Event where only one outstanding message per ID exists), this function uses
+ * both msgId AND sessionId to locate an existing slot. This prevents consecutive
+ * async Method responses with the same methodId but different sessionIds from
+ * silently overwriting each other.
+ *
+ * Slot search priority:
+ *   1. Exact match: same msgId AND same sessionId -> overwrite (duplicate response)
+ *   2. First free slot (msgId == 0xFF)
+ *   3. Round-robin eviction if all slots are occupied
+ */
+static void PICC_StoreResponseToSlot(PICC_RxSlot_t *slots, uint8 msgId,
+                                      uint8 sessionId, uint8 returnCode,
+                                      const uint8 *payload, uint16 payloadLen,
+                                      uint8 *victimIdx)
+{
+    uint8 s;
+    uint8 freeSlot = 0xFFU;
+    uint16 copyLen;
+
+    /* Find existing slot with same (msgId + sessionId), or first free slot */
+    for (s = 0U; s < PICC_RX_MAX_SLOTS; s++) {
+        if ((slots[s].msgId == msgId) && (slots[s].sessionId == sessionId)) {
+            freeSlot = s;
+            break;  /* Exact match: overwrite this slot */
+        }
+        if ((freeSlot == 0xFFU) && (slots[s].msgId == 0xFFU)) {
+            freeSlot = s;
+        }
+    }
+
+    if (freeSlot == 0xFFU) {
+        /* All slots occupied, evict in round-robin order */
+        freeSlot = *victimIdx;
+        *victimIdx = (uint8)((*victimIdx + 1U) % PICC_RX_MAX_SLOTS);
+    }
+
+    copyLen = (payloadLen > PICC_RX_MAX_DATA_LEN) ? PICC_RX_MAX_DATA_LEN : payloadLen;
+    slots[freeSlot].msgId = msgId;
+    slots[freeSlot].sessionId = sessionId;
+    slots[freeSlot].returnCode = returnCode;
+    for (s = 0U; s < copyLen; s++) {
+        slots[freeSlot].data[s] = payload[s];
+    }
+    slots[freeSlot].dataLen = payloadLen;
+    slots[freeSlot].cbResultLen = 0U;
+    slots[freeSlot].ready = TRUE;
+}
+
+/**
+ * @brief Read data from a slot (by msgId, optionally by sessionId).
+ *        If found and ready, copies data + cbResult and clears flag.
+ *
+ * @param[in] filterSessionId  Session ID filter. 0x00 = match any session (for Method/Event).
+ *                              Non-zero = match exact sessionId (for async Response).
  * @return PICC_E_OK if data available, PICC_E_NO_DATA if not
  */
-static sint8 PICC_ReadFromSlot(PICC_RxSlot_t *slots, uint8 msgId, uint8 *returnCode,
+static sint8 PICC_ReadFromSlot(PICC_RxSlot_t *slots, uint8 msgId,
+                                uint8 filterSessionId, uint8 *returnCode,
                                 uint8 *data, uint16 maxLen, uint16 *actualLen,
                                 uint8 *cbResult, uint16 *cbResultLen)
 {
@@ -195,6 +257,10 @@ static sint8 PICC_ReadFromSlot(PICC_RxSlot_t *slots, uint8 msgId, uint8 *returnC
 
     for (s = 0U; s < PICC_RX_MAX_SLOTS; s++) {
         if ((slots[s].msgId == msgId) && (slots[s].ready == TRUE)) {
+            /* If sessionId filter is non-zero, must also match sessionId */
+            if ((filterSessionId != 0U) && (slots[s].sessionId != filterSessionId)) {
+                continue;  /* Same methodId but different session, skip */
+            }
             /* Found matching slot with new data */
             if (returnCode != NULL) {
                 *returnCode = slots[s].returnCode;
@@ -226,6 +292,7 @@ static sint8 PICC_ReadFromSlot(PICC_RxSlot_t *slots, uint8 msgId, uint8 *returnC
             }
             slots[s].ready = FALSE;
             slots[s].msgId = 0xFFU;
+            slots[s].sessionId = 0U;
             slots[s].returnCode = 0U;
             slots[s].dataLen = 0U;
             slots[s].cbResultLen = 0U;
@@ -327,8 +394,9 @@ void PICC_StoreToMailbox(const PICC_MsgHeader_t *header,
                 appIdx = PICC_FindAppByRemoteId(header->consumerId);
             }
             if (appIdx < (uint8)PICC_APP_MAX) {
-                PICC_StoreToSlot(g_rxMailbox[appIdx].response,
-                                 header->methodId, header->returnCode,
+                PICC_StoreResponseToSlot(g_rxMailbox[appIdx].response,
+                                 header->methodId, header->sessionId,
+                                 header->returnCode,
                                  payload, payloadLen,
                                  &g_rxMailbox[appIdx].responseVictim);
             }
@@ -429,12 +497,12 @@ sint8 PICC_MailboxGetMethodData(PICC_AppIndex_e appIndex, uint8 methodId,
         return PICC_E_PARAM;
     }
     return PICC_ReadFromSlot(g_rxMailbox[(uint8)appIndex].method,
-                             methodId, NULL, data, maxLen, actualLen,
+                             methodId, 0U, NULL, data, maxLen, actualLen,
                              cbResult, cbResultLen);
 }
 
 sint8 PICC_MailboxGetResponseData(PICC_AppIndex_e appIndex, uint8 methodId,
-                                  uint8 *returnCode,
+                                  uint8 sessionId, uint8 *returnCode,
                                   uint8 *data, uint16 maxLen, uint16 *actualLen,
                                   uint8 *cbResult, uint16 *cbResultLen)
 {
@@ -445,7 +513,7 @@ sint8 PICC_MailboxGetResponseData(PICC_AppIndex_e appIndex, uint8 methodId,
         return PICC_E_PARAM;
     }
     return PICC_ReadFromSlot(g_rxMailbox[(uint8)appIndex].response,
-                             methodId, returnCode, data, maxLen, actualLen,
+                             methodId, sessionId, returnCode, data, maxLen, actualLen,
                              cbResult, cbResultLen);
 }
 
@@ -460,7 +528,7 @@ sint8 PICC_MailboxGetEventData(PICC_AppIndex_e appIndex, uint8 eventId,
         return PICC_E_PARAM;
     }
     return PICC_ReadFromSlot(g_rxMailbox[(uint8)appIndex].event,
-                             eventId, NULL, data, maxLen, actualLen,
+                             eventId, 0U, NULL, data, maxLen, actualLen,
                              cbResult, cbResultLen);
 }
 

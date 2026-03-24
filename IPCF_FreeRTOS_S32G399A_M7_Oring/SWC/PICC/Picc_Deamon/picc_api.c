@@ -270,11 +270,12 @@ sint8 PICC_GetMethodData(PICC_AppIndex_e appIndex, uint8 methodId,
  *         PICC_E_PARAM    = Invalid parameters provided.
  */
 sint8 PICC_GetResponseData(PICC_AppIndex_e appIndex, uint8 methodId,
-                           uint8 *returnCode,
+                           uint8 sessionId, uint8 *returnCode,
                            uint8 *data, uint16 maxLen, uint16 *actualLen,
                            uint8 *cbResult, uint16 *cbResultLen)
 {
-    return PICC_MailboxGetResponseData(appIndex, methodId, returnCode, data, maxLen, actualLen,
+    return PICC_MailboxGetResponseData(appIndex, methodId, sessionId, returnCode,
+                                       data, maxLen, actualLen,
                                        cbResult, cbResultLen);
 }
 
