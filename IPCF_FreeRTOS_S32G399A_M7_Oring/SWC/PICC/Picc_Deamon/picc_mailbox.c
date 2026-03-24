@@ -25,7 +25,7 @@ extern "C" {
  *==================================================================================================*/
 
 /** Max number of different msgId slots per app per type */
-#define PICC_RX_MAX_SLOTS       (4U)
+#define PICC_RX_MAX_SLOTS       (6U)
 
 /** Max payload bytes stored per slot */
 #define PICC_RX_MAX_DATA_LEN    (32U)
@@ -50,6 +50,9 @@ typedef struct {
     PICC_RxSlot_t method[PICC_RX_MAX_SLOTS];    /**< Method requests (Server receives) */
     PICC_RxSlot_t response[PICC_RX_MAX_SLOTS];  /**< Method responses (Client receives) */
     PICC_RxSlot_t event[PICC_RX_MAX_SLOTS];     /**< Event notifications */
+    uint8 methodVictim;                         /**< Round-robin victim for method slots */
+    uint8 responseVictim;                       /**< Round-robin victim for response slots */
+    uint8 eventVictim;                          /**< Round-robin victim for event slots */
 } PICC_RxMailbox_t;
 
 /** Per-application context */
@@ -87,15 +90,21 @@ static void PICC_InitContexts(void)
     if (g_contextsInited == FALSE) {
         for (a = 0U; a < (uint8)PICC_APP_MAX; a++) {
             g_appContexts[a].isRegistered = FALSE;
+            g_rxMailbox[a].methodVictim = 0U;
+            g_rxMailbox[a].responseVictim = 0U;
+            g_rxMailbox[a].eventVictim = 0U;
             for (s = 0U; s < PICC_RX_MAX_SLOTS; s++) {
                 g_rxMailbox[a].method[s].ready = FALSE;
                 g_rxMailbox[a].method[s].msgId = 0xFFU;
+                g_rxMailbox[a].method[s].dataLen = 0U;
                 g_rxMailbox[a].method[s].cbResultLen = 0U;
                 g_rxMailbox[a].response[s].ready = FALSE;
                 g_rxMailbox[a].response[s].msgId = 0xFFU;
+                g_rxMailbox[a].response[s].dataLen = 0U;
                 g_rxMailbox[a].response[s].cbResultLen = 0U;
                 g_rxMailbox[a].event[s].ready = FALSE;
                 g_rxMailbox[a].event[s].msgId = 0xFFU;
+                g_rxMailbox[a].event[s].dataLen = 0U;
                 g_rxMailbox[a].event[s].cbResultLen = 0U;
             }
         }
@@ -138,7 +147,8 @@ static uint8 PICC_FindAppByRemoteId(uint8 remoteId)
  * @brief Store data into a slot array (find by msgId, reuse or allocate)
  */
 static void PICC_StoreToSlot(PICC_RxSlot_t *slots, uint8 msgId, uint8 returnCode,
-                              const uint8 *payload, uint16 payloadLen)
+                              const uint8 *payload, uint16 payloadLen,
+                              uint8 *victimIdx)
 {
     uint8 s;
     uint8 freeSlot = 0xFFU;
@@ -156,8 +166,9 @@ static void PICC_StoreToSlot(PICC_RxSlot_t *slots, uint8 msgId, uint8 returnCode
     }
 
     if (freeSlot == 0xFFU) {
-        /* All slots occupied with different msgIds, overwrite slot 0 */
-        freeSlot = 0U;
+        /* All slots occupied with different msgIds, evict in round-robin order. */
+        freeSlot = *victimIdx;
+        *victimIdx = (uint8)((*victimIdx + 1U) % PICC_RX_MAX_SLOTS);
     }
 
     copyLen = (payloadLen > PICC_RX_MAX_DATA_LEN) ? PICC_RX_MAX_DATA_LEN : payloadLen;
@@ -213,7 +224,11 @@ static sint8 PICC_ReadFromSlot(PICC_RxSlot_t *slots, uint8 msgId, uint8 *returnC
             } else if (cbResultLen != NULL) {
                 *cbResultLen = 0U;
             }
-            slots[s].ready = FALSE;  /* Clear flag */
+            slots[s].ready = FALSE;
+            slots[s].msgId = 0xFFU;
+            slots[s].returnCode = 0U;
+            slots[s].dataLen = 0U;
+            slots[s].cbResultLen = 0U;
             return PICC_E_OK;
         }
     }
@@ -300,7 +315,8 @@ void PICC_StoreToMailbox(const PICC_MsgHeader_t *header,
             appIdx = PICC_FindAppByLocalId(header->providerId);
             if (appIdx < (uint8)PICC_APP_MAX) {
                 PICC_StoreToSlot(g_rxMailbox[appIdx].method,
-                                 header->methodId, 0U, payload, payloadLen);
+                                 header->methodId, 0U, payload, payloadLen,
+                                 &g_rxMailbox[appIdx].methodVictim);
             }
             break;
 
@@ -313,7 +329,8 @@ void PICC_StoreToMailbox(const PICC_MsgHeader_t *header,
             if (appIdx < (uint8)PICC_APP_MAX) {
                 PICC_StoreToSlot(g_rxMailbox[appIdx].response,
                                  header->methodId, header->returnCode,
-                                 payload, payloadLen);
+                                 payload, payloadLen,
+                                 &g_rxMailbox[appIdx].responseVictim);
             }
             break;
 
@@ -326,7 +343,8 @@ void PICC_StoreToMailbox(const PICC_MsgHeader_t *header,
             }
             if (appIdx < (uint8)PICC_APP_MAX) {
                 PICC_StoreToSlot(g_rxMailbox[appIdx].event,
-                                 header->methodId, 0U, payload, payloadLen);
+                                 header->methodId, 0U, payload, payloadLen,
+                                 &g_rxMailbox[appIdx].eventVictim);
             }
             break;
 
