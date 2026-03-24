@@ -17,7 +17,7 @@ extern "C" {
 #include "picc_stack.h"
 #include "picc_heartbeat.h"
 #include "picc_trace.h" /* For TX/RX debug trace */
-#include "Picc_main.h"    /* For HANDLE_ERROR */
+#include "Picc_main.h"    /* For PICC_HANDLE_ERROR */
 #include "ipc-shm.h"
 #include "ipcf_Ip_Cfg_Defines.h"  /* For IPCF_INSTANCE0 */
 #include "FreeRTOS.h"
@@ -86,7 +86,7 @@ static sint8 PICC_StackDoSendForChannel(uint8 channelId)
     
     inst = PICC_GetStackInstance(channelId);
     if (inst == NULL || inst->initialized == FALSE) {
-        HANDLE_ERROR(-31);  /* Stack: Invalid channel in DoSend */
+        PICC_HANDLE_ERROR(-31);  /* Stack: Invalid channel in DoSend */
         return -1;
     }
 
@@ -158,7 +158,7 @@ static sint8 PICC_StackDoSendForChannel(uint8 channelId)
     if (err != 0) {
         (void)ipc_shm_release_buf(IPCF_INSTANCE0, inst->config.channelId, shmBuf);
         taskEXIT_CRITICAL();
-        HANDLE_ERROR(-32);  /* Stack: IPCF TX failed */
+        PICC_HANDLE_ERROR(-32);  /* Stack: IPCF TX failed */
         return -2;
     }
 
@@ -210,13 +210,13 @@ sint8 PICC_StackInitChannel(const PICC_StackConfig_t *config)
     PICC_StackInstance_t *inst;
     
     if (config == NULL) {
-        HANDLE_ERROR(-1);  /* Config parameter is NULL */
+        PICC_HANDLE_ERROR(-1);  /* Config parameter is NULL */
         return -1;
     }
     
     inst = PICC_GetStackInstance(config->channelId);
     if (inst == NULL) {
-        HANDLE_ERROR(-2);  /* Invalid channelId */
+        PICC_HANDLE_ERROR(-2);  /* Invalid channelId */
         return -2;
     }
     
@@ -278,13 +278,13 @@ sint8 PICC_StackAddMessageToChannel(uint8 channelId, const uint8 *data, uint32 l
     }
 
     if ((data == NULL) || (len == 0U)) {
-        HANDLE_ERROR(-33);  /* Stack: AddMessage data is NULL or len is 0 */
+        PICC_HANDLE_ERROR(-33);  /* Stack: AddMessage data is NULL or len is 0 */
         return -2;
     }
 
     /* Check again (single message too large) */
     if (len > PICC_STACK_PAYLOAD_MAX_SIZE) {
-        HANDLE_ERROR(-34);  /* Stack: Message too large */
+        PICC_HANDLE_ERROR(-34);  /* Stack: Message too large */
         return -3;
     }
 
@@ -327,13 +327,13 @@ sint8 PICC_StackFlushChannel(uint8 channelId)
     
     inst = PICC_GetStackInstance(channelId);
     if (inst == NULL || inst->initialized == FALSE) {
-        HANDLE_ERROR(-35);  /* Stack: Invalid channel in FlushChannel */
+        PICC_HANDLE_ERROR(-35);  /* Stack: Invalid channel in FlushChannel */
         return -1;
     }
 
     ret = PICC_StackDoSendForChannel(channelId);
     if (ret != 0 && ret != -1) {  /* -1 is buffer unavailable, normal case */
-        HANDLE_ERROR(-36);  /* Stack: FlushChannel send failed */
+        PICC_HANDLE_ERROR(-36);  /* Stack: FlushChannel send failed */
     }
     return ret;
 }
@@ -383,13 +383,13 @@ sint8 PICC_StackProcessRx(const uint8 *data, uint32 len,
     
     inst = PICC_GetStackInstance(channelId);
     if (inst == NULL || inst->initialized == FALSE) {
-        HANDLE_ERROR(-37);  /* Stack: Invalid channel in ProcessRx */
+        PICC_HANDLE_ERROR(-37);  /* Stack: Invalid channel in ProcessRx */
         return -1;
     }
 
     /* Minimum length: CRC_Enable(1B) + Counter(2B) + CRC16(2B) = 5 bytes */
     if ((data == NULL) || (len < PICC_STACK_OVERHEAD_SIZE)) {
-        HANDLE_ERROR(-38);  /* Stack: ProcessRx invalid data or length */
+        PICC_HANDLE_ERROR(-38);  /* Stack: ProcessRx invalid data or length */
         return -2;
     }
 
@@ -415,7 +415,7 @@ sint8 PICC_StackProcessRx(const uint8 *data, uint32 len,
         crcCalculated = PICC_CRC16(data, len - PICC_STACK_CRC_SIZE);
 
         if (crcReceived != crcCalculated) {
-            HANDLE_ERROR(-3);  /* CRC verification failed */
+            PICC_HANDLE_ERROR(-3);  /* CRC verification failed */
             return -3;
         }
     }

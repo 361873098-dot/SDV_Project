@@ -50,8 +50,9 @@ extern "C" {
  * @brief Register an application with the PICC driver and initialize its context
  *
  * This function must be called by each application module (e.g., PWSM, OTA) before using 
- * any other PICC transmission or reception APIs. It registers the module's Provider ID 
- * and callback functions, sets up the mailbox, and initializes the underlying IPCF channel.
+ * any other PICC transmission or reception APIs. It registers the module's Provider ID,
+ * optional Method/Event callbacks, sets up the mailbox, and initializes the underlying
+ * IPCF channel.
  *
  * @par Callback Documentation:
  * When initializing PICC_Init(), you can pass callback functions in 'config'. The signatures 
@@ -78,7 +79,8 @@ extern "C" {
  *  - @b cbResultLen: [Output] Indicates how many bytes of 'cbResult' the M-Core handler populated.
  *
  * @param[in] appIndex Application index from PICC_AppIndex_e enum (e.g., PICC_APP_PWR).
- * @param[in] config   Pointer to application configuration (IDs, Role, Channel, and Callback functions).
+ * @param[in] config   Pointer to application configuration (IDs, role, channel,
+ *                     and optional Method/Event callbacks).
  *
  * @return PICC_E_OK        on success
  * @return PICC_E_PARAM     if config is NULL or appIndex is out of range
@@ -123,17 +125,12 @@ sint8 PICC_Init(PICC_AppIndex_e appIndex, const PICC_AppConfig_t *config)
         return ret;
     }
 
-    /* 3. Register Link state callback (optional) */
-    if (config->linkStateCallback != NULL) {
-        (void)PICC_LinkRegisterStateCallback(config->linkStateCallback);
-    }
-
-    /* 4. Register Method handler (optional) */
+    /* 3. Register Method handler (optional) */
     if (config->methodHandler != NULL) {
         (void)PICC_RegisterMethodHandler(config->localId, config->methodHandler);
     }
 
-    /* 5. Register Event handler (optional) */
+    /* 4. Register Event handler (optional) */
     if (config->eventHandler != NULL) {
         (void)PICC_RegisterEventHandler(config->remoteId, config->eventHandler);
     }
@@ -315,13 +312,16 @@ sint8 PICC_GetEventData(PICC_AppIndex_e appIndex, uint8 eventId,
 /**
  * @brief Get the current IPCF channel connection state
  *
- * Indicates whether the underlying IPCF link is connected or disconnected.
- * This can be used in polling mode when no linkStateCallback is registered.
+ * Indicates whether the underlying IPCF link is disconnected, connecting,
+ * or connected.
+ *
+ * This is the public polling API for application code that wants to inspect
+ * link state explicitly. PICC send APIs already perform their own internal
+ * link-state validation before transmitting.
  *
  * @param[in] channelId IPCF Channel ID
  *
- * @return PICC_LINK_STATE_CONNECTED if the channel is up and running
- *         PICC_LINK_STATE_DISCONNECTED if the channel is down
+ * @return Current link state for the specified channel
  */
 PICC_LinkState_e PICC_GetLinkState(uint8 channelId)
 {

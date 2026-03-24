@@ -68,11 +68,6 @@ typedef struct {
     boolean           isInitialized;    /**< Whether initialized */
 } PICC_LinkContext_t;
 
-/**
- * @brief Connection state change callback function type
- */
-typedef void (*PICC_LinkStateCallback_t)(uint8 remoteId, PICC_LinkState_e state);
-
 /*==================================================================================================
  *                                         Function Declarations
  *==================================================================================================*/
@@ -162,14 +157,6 @@ sint8 PICC_LinkHandleDisconnect(const PICC_MsgHeader_t *header,
  * @return Connection state
  */
 PICC_LinkState_e PICC_LinkGetState(uint8 channelId);
-
-/**
- * @brief Register connection state change callback
- * 
- * @param[in] callback Callback function
- * @return 0 on success, non-zero on failure
- */
-sint8 PICC_LinkRegisterStateCallback(PICC_LinkStateCallback_t callback);
 
 /**
  * @brief Set link state to CONNECTING (called by heartbeat on timeout)

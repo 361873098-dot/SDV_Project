@@ -15,7 +15,7 @@ extern "C" {
 
 #include "picc_link.h"
 #include "FreeRTOS.h"
-#include "Picc_main.h" /* For HANDLE_ERROR */
+#include "Picc_main.h" /* For PICC_HANDLE_ERROR */
 #include "ipc-shm.h"
 #include "ipcf_Ip_Cfg_Defines.h" /* For IPCF_INSTANCE0 */
 #include "picc_stack.h"
@@ -29,9 +29,6 @@ extern "C" {
 
 /** Link context array */
 static PICC_LinkContext_t g_linkContexts[PICC_MAX_CHANNELS];
-
-/** State change callback */
-static PICC_LinkStateCallback_t g_stateCallback = NULL;
 
 /** Send flow control: backoff counter (incremented when buffer full, used to reduce send frequency) */
 static uint8 g_sendBackoffCounter = 0U;
@@ -112,7 +109,7 @@ static sint8 PICC_LinkSendMessage(uint8 providerId, uint8 consumerId,
     packedLen = PICC_PackMessage(txBuf, sizeof(txBuf), &header,
                                  (const uint8 *)&linkPayload, sizeof(PICC_LinkPayload_t));
     if (packedLen == 0U) {
-        HANDLE_ERROR(-1);  /* Failed to pack link message */
+        PICC_HANDLE_ERROR(-1);  /* Failed to pack link message */
         return -1;
     }
 
@@ -125,23 +122,10 @@ static sint8 PICC_LinkSendMessage(uint8 providerId, uint8 consumerId,
  */
 static void PICC_LinkSetState(PICC_LinkContext_t *ctx, PICC_LinkState_e newState)
 {
-    PICC_LinkState_e oldState;
-    boolean stateChanged = FALSE;
-    
-    /* [FIX] Use critical section to atomically check-and-update state */
+    /* [FIX] Use critical section to atomically update state */
     taskENTER_CRITICAL();
-    oldState = ctx->state;
-    if (oldState != newState) {
-        ctx->state = newState;
-        stateChanged = TRUE;
-    }
+    ctx->state = newState;
     taskEXIT_CRITICAL();
-    
-    /* Call callback outside critical section to avoid potential deadlock */
-    if (stateChanged && g_stateCallback != NULL) {
-        /* Pass channelId or RemoteId, still passing RemoteId here */
-        g_stateCallback(ctx->config.remoteId, newState);
-    }
 }
 
 /*==================================================================================================
@@ -218,7 +202,7 @@ sint8 PICC_LinkInit(const PICC_LinkConfig_t *config)
     uint32 i;
 
     if (config == NULL) {
-        HANDLE_ERROR(-1);  /* Link config parameter is NULL */
+        PICC_HANDLE_ERROR(-1);  /* Link config parameter is NULL */
         return -1;
     }
 
@@ -271,14 +255,14 @@ sint8 PICC_LinkAddChannel(uint8 instanceId, uint8 channelId)
     }
 
     if (slot == -1) {
-        HANDLE_ERROR(-4);  /* No free slot for link channel */
+        PICC_HANDLE_ERROR(-4);  /* No free slot for link channel */
         return -1; /* No free slot */
     }
 
     /* Reuse first channel's config, only modify channel/instance */
     /* Assume at least one channel is initialized (LinkInit called) */
     if (g_linkContexts[0].isInitialized == FALSE) {
-        HANDLE_ERROR(-5);  /* Primary link channel not initialized */
+        PICC_HANDLE_ERROR(-5);  /* Primary link channel not initialized */
         return -2;
     }
     
@@ -316,7 +300,6 @@ void PICC_LinkDeinit(void)
         g_linkContexts[i].state = PICC_LINK_STATE_DISCONNECTED;
     }
     
-    g_stateCallback = NULL;
 }
 
 /**
@@ -372,7 +355,7 @@ sint8 PICC_LinkHandleResponse(const PICC_MsgHeader_t *header,
     (void)len;
 
     if ((header == NULL) || (payload == NULL)) {
-        HANDLE_ERROR(-6);  /* Link handle response parameter NULL */
+        PICC_HANDLE_ERROR(-6);  /* Link handle response parameter NULL */
         return -1;
     }
     
@@ -429,7 +412,7 @@ sint8 PICC_LinkHandleRequest(const PICC_MsgHeader_t *header,
     (void)len;
 
     if ((header == NULL) || (payload == NULL)) {
-        HANDLE_ERROR(-7);  /* Link handle request parameter NULL */
+        PICC_HANDLE_ERROR(-7);  /* Link handle request parameter NULL */
         return -1;
     }
 
@@ -453,7 +436,7 @@ sint8 PICC_LinkHandleRequest(const PICC_MsgHeader_t *header,
             if (ret == 0) {
                 PICC_LinkSetState(ctx, PICC_LINK_STATE_CONNECTED);
             } else {
-                HANDLE_ERROR(-8);  /* Failed to send link response */
+                PICC_HANDLE_ERROR(-8);  /* Failed to send link response */
             }
         }
     }
@@ -486,7 +469,7 @@ sint8 PICC_LinkSendDisconnect(void)
             if (sendRet == 0) {
                 PICC_LinkSetState(ctx, PICC_LINK_STATE_DISCONNECTED);
             } else {
-                HANDLE_ERROR(-9);  /* Failed to send disconnect */
+                PICC_HANDLE_ERROR(-9);  /* Failed to send disconnect */
                 ret = -1;
             }
         }
@@ -527,7 +510,7 @@ sint8 PICC_LinkHandleDisconnect(const PICC_MsgHeader_t *header,
     (void)len;
 
     if (payload == NULL) {
-        HANDLE_ERROR(-10);  /* Link handle disconnect payload NULL */
+        PICC_HANDLE_ERROR(-10);  /* Link handle disconnect payload NULL */
         return -1;
     }
     linkPayload = (const PICC_LinkPayload_t *)payload;
@@ -618,21 +601,11 @@ PICC_LinkState_e PICC_LinkGetState(uint8 channelId)
 }
 
 /**
- * @brief Register connection state change callback
- */
-sint8 PICC_LinkRegisterStateCallback(PICC_LinkStateCallback_t callback)
-{
-    g_stateCallback = callback;
-    return 0;
-}
-
-/**
  * @brief Trigger reconnect on specified channel (called by heartbeat on timeout)
  * 
  * [R6] On heartbeat timeout:
- * 1. Report fault to app layer through state change callback
- * 2. CLIENT: Set to CONNECTING state to trigger auto reconnect
- * 3. SERVER: Set to DISCONNECTED state and wait for CLIENT to reconnect
+ * 1. CLIENT: Set to CONNECTING state to trigger auto reconnect
+ * 2. SERVER: Set to DISCONNECTED state and wait for CLIENT to reconnect
  */
 void PICC_LinkTriggerReconnect(uint8 instanceId, uint8 channelId)
 {
@@ -662,14 +635,14 @@ sint8 PICC_LinkProcessMessage(const PICC_MsgHeader_t *header,
     PICC_LinkContext_t *ctx;
 
     if ((header == NULL) || (payload == NULL)) {
-        HANDLE_ERROR(-11);
+        PICC_HANDLE_ERROR(-11);
         return -1;
     }
 
     /* [FIX] Disconnect notification only has 1 or 2 bytes payload.
      * Only CONNECT requires the full PICC_LinkPayload_t (4 bytes). */
     if (len < 1U) {
-        HANDLE_ERROR(-12);
+        PICC_HANDLE_ERROR(-12);
         return -1;
     }
 

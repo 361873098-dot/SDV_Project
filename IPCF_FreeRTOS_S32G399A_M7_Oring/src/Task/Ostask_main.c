@@ -246,6 +246,7 @@ static void OsTask_10ms_Thread(void *pvParameters)
 
     (void)pvParameters;
 
+    /* Initialize the xLastWakeTime variable with current time */
     xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
@@ -282,7 +283,7 @@ static void OsTask_10ms_Thread(void *pvParameters)
  * @brief Create all application FreeRTOS tasks and start the scheduler
  *
  * This is the SINGLE entry point for all RTOS task creation.
- * Called from main() after all PreOS initialization is complete.
+ * Called from main() after all PreOS and application initialization is complete.
  *
  * @note This function does NOT return (vTaskStartScheduler takes over).
  *
@@ -295,9 +296,6 @@ static void OsTask_10ms_Thread(void *pvParameters)
 void OsTask_Creation_All(void)
 {
     BaseType_t os_status;
-
-    /* Initialize Power Management Application with PICC */
-    Pwsm_Init();
 
     /* ========================================================================
      * 1. Unified 1ms periodic task
@@ -333,7 +331,7 @@ void OsTask_Creation_All(void)
      * 3. PICC RX message processing task (event-driven, queue blocking)
      *    Blocks on xQueueReceive(portMAX_DELAY) - must be independent task
      * ======================================================================== */
-    os_status = xTaskCreate((TaskFunction_t)App_Rx_Msg_10ms_Task,
+    os_status = xTaskCreate((TaskFunction_t)PICC_Rx_Msg_10ms_Task,
                             "App_Rx_Msg",
                             OSTASK_RX_MSG_STACK_SIZE,
                             NULL,

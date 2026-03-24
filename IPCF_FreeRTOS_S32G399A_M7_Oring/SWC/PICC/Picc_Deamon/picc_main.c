@@ -127,11 +127,14 @@ typedef struct {
     uint16  totalRecords;                                            /**< Total records count */
 } PICC_DiagRecord_t;
 
-/** Diagnostic record for RX data */
-static PICC_DiagRecord_t g_diagRecordRx;
+/** Combined diagnostic record (view in TRACE32: Var.View g_diagRecord_Debug) */
+typedef struct {
+    PICC_DiagRecord_t tx;  /**< TX diagnostic buffer */
+    PICC_DiagRecord_t rx;  /**< RX diagnostic buffer */
+} PICC_ChannelDiag_t;
 
-/** Diagnostic record for TX data */
-static PICC_DiagRecord_t g_diagRecordTx;
+PICC_ChannelDiag_t g_diagRecord_Debug;
+
 
 /**
  * @brief Initialize diagnostic record structure
@@ -255,7 +258,7 @@ static void PICC_DiagRecordAdd(PICC_DiagRecord_t *record, const uint8 *data, uin
  */
 void PICC_DiagRecordAddTx(const uint8 *data, uint32 len)
 {
-    PICC_DiagRecordAdd(&g_diagRecordTx, data, len);
+    PICC_DiagRecordAdd(&g_diagRecord_Debug.tx, data, len);
 }
 #endif /* PICC_DIAG_RECORD_ENABLE */
 
@@ -310,7 +313,7 @@ void PICC_data_mng_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *b
     (void)instance;
 
     if (appPtr != &g_appData || size > MAX_MSG_LEN) {
-        HANDLE_ERROR(-IPC_SHM_E_INVAL);
+        PICC_HANDLE_ERROR(-IPC_SHM_E_INVAL);
         return;
     }
 
@@ -318,7 +321,7 @@ void PICC_data_mng_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void *b
 
 #if (PICC_DIAG_RECORD_ENABLE == 1U)
     /* Record received data to diagnostic buffer (excludes heartbeat) */
-    PICC_DiagRecordAdd(&g_diagRecordRx, (const uint8 *)buf, size);
+    PICC_DiagRecordAdd(&g_diagRecord_Debug.rx, (const uint8 *)buf, size);
 #endif
 
     /* Construct message */
@@ -354,7 +357,7 @@ void PICC_data_unmng_rx_cb(void *arg, const uint8 instance, uint8 chan_id, void 
     (void)mem;
 
     if (appPtr != &g_unmngDat) {
-        HANDLE_ERROR(-IPC_SHM_E_INVAL);
+        PICC_HANDLE_ERROR(-IPC_SHM_E_INVAL);
         return;
     }
 }
@@ -454,7 +457,7 @@ void PICC_PreOS_Init(void)
      * ======================================================================== */
     g_rxQueue = xQueueCreate(10, sizeof(App_RxMsg_t));
     if (g_rxQueue == NULL) {
-        HANDLE_ERROR(-1);
+        PICC_HANDLE_ERROR(-1);
     }
 
     /* ========================================================================
@@ -470,8 +473,8 @@ void PICC_PreOS_Init(void)
 
 #if (PICC_DIAG_RECORD_ENABLE == 1U)
     /* Initialize diagnostic record buffers */
-    PICC_DiagRecordInit(&g_diagRecordRx);
-    PICC_DiagRecordInit(&g_diagRecordTx);
+    PICC_DiagRecordInit(&g_diagRecord_Debug.rx);
+    PICC_DiagRecordInit(&g_diagRecord_Debug.tx);
 #endif
 
     /* ========================================================================
@@ -482,7 +485,7 @@ void PICC_PreOS_Init(void)
     } while (err == -IPC_SHM_E_REMOTE_INIT_IN_PROGRESS);
     
     if (err != 0) {
-        HANDLE_ERROR(err);
+        PICC_HANDLE_ERROR(err);
     }
 
     if (ipc_shm_is_remote_ready(IPCF_INSTANCE0) != 0) {
@@ -492,7 +495,7 @@ void PICC_PreOS_Init(void)
     /* Get control channel memory */
     g_appData.ctrl_shm = ipc_shm_unmanaged_acquire(IPCF_INSTANCE0, CTRL_CHAN_ID);
     if (g_appData.ctrl_shm == NULL) {
-        HANDLE_ERROR(-IPC_SHM_E_NOMEM);
+        PICC_HANDLE_ERROR(-IPC_SHM_E_NOMEM);
     }
 
     /* ========================================================================
@@ -511,12 +514,12 @@ void PICC_PreOS_Init(void)
      * ======================================================================== */
     err = PICC_InitChannel(IPCF_INSTANCE0, 1U);
     if (err != 0) {
-        HANDLE_ERROR(err);
+        PICC_HANDLE_ERROR(err);
     }
 
     err = PICC_InitChannel(IPCF_INSTANCE0, 2U);
     if (err != 0) {
-        HANDLE_ERROR(err);
+        PICC_HANDLE_ERROR(err);
     }
 
     /* ========================================================================
@@ -616,7 +619,7 @@ static sint8 PICC_ProcessRxData(const uint8 instance, uint8 chan_id,
  *       xQueueReceive with portMAX_DELAY (infinite blocking).
  *       It is created by OsTask_Creation_All() in Ostask_main.c.
  */
-void App_Rx_Msg_10ms_Task(void *params)
+void PICC_Rx_Msg_10ms_Task(void *params)
 {
     App_RxMsg_t rxMsg;
     sint8 err;
@@ -651,7 +654,7 @@ void App_Rx_Msg_10ms_Task(void *params)
  * 
  * @note Only records error, doesn't block system, allows continued execution for debugging
  */
-void handle_error(sint8 error, const char *file, int line)
+void PICC_handle_error(sint8 error, const char *file, int line)
 {
     g_appData.last_error = error;
     g_appData.error_file = file;
