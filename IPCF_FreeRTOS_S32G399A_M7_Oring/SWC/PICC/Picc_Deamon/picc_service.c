@@ -159,10 +159,14 @@ static sint8 PICC_ServiceSendMessage(const PICC_MsgHeader_t *header,
  */
 static sint8 PICC_ServiceHandleEvent(const PICC_MsgHeader_t *header,
                                      const uint8 *payload, uint16 len,
-                                     uint8 instanceId, uint8 channelId)
+                                     uint8 instanceId, uint8 channelId,
+                                     uint8 *cbResult, uint16 *cbResultLen)
 {
     uint32 i;
     
+    /* Initialize callback result to empty */
+    *cbResultLen = 0U;
+
     /* If Event with ACK, auto reply EVENT_ACK */
     if (header->msgType == (uint8)PICC_MSG_NOTIFICATION_WITH_ACK) {
         (void)PICC_ServiceSendAck((uint8)PICC_MSG_EVENT_ACK,
@@ -178,7 +182,9 @@ static sint8 PICC_ServiceHandleEvent(const PICC_MsgHeader_t *header,
         if (g_eventHandlers[i].isUsed && 
             g_eventHandlers[i].providerId == header->providerId &&
             g_eventHandlers[i].callback != NULL) {
-            g_eventHandlers[i].callback(header->providerId, header->methodId, payload, len);
+            g_eventHandlers[i].callback(header->providerId, header->methodId,
+                                        payload, len,
+                                        cbResult, cbResultLen);
         }
     }
 
@@ -190,12 +196,16 @@ static sint8 PICC_ServiceHandleEvent(const PICC_MsgHeader_t *header,
  */
 static sint8 PICC_ServiceHandleRequest(const PICC_MsgHeader_t *header,
                                        const uint8 *payload, uint16 len,
-                                       uint8 instanceId, uint8 channelId)
+                                       uint8 instanceId, uint8 channelId,
+                                       uint8 *cbResult, uint16 *cbResultLen)
 {
     uint32 i;
     uint8 returnCode = (uint8)PICC_RET_OK;
     uint16 rspLen = 0U;
     PICC_MsgHeader_t rspHeader;
+
+    /* Initialize callback result to empty */
+    *cbResultLen = 0U;
 
     /* If REQUEST_NO_RETURN_WITH_ACK, auto reply ACK */
     if (header->msgType == (uint8)PICC_MSG_REQUEST_NO_RETURN_WITH_ACK) {
@@ -215,7 +225,8 @@ static sint8 PICC_ServiceHandleRequest(const PICC_MsgHeader_t *header,
             returnCode = g_methodHandlers[i].callback(header->consumerId,
                                                       header->methodId,
                                                       payload, len,
-                                                      g_rspBuffer, &rspLen);
+                                                      g_rspBuffer, &rspLen,
+                                                      cbResult, cbResultLen);
             break;  /* Only one handler matches */
         }
     }
@@ -367,11 +378,11 @@ sint8 PICC_RegisterResponseHandler(PICC_ResponseCallback_t callback)
  *==================================================================================================*/
 
 /**
- * @brief Send Event notification
+ * @brief Send Event notification (internal service layer function)
  */
-sint8 PICC_SendEvent(uint8 providerId, uint8 eventId, uint8 consumerId,
-                     const uint8 *data, uint16 len, PICC_EventType_e withAck,
-                     uint8 channelId)
+sint8 PICC_ServiceEventSend(uint8 providerId, uint8 eventId, uint8 consumerId,
+                            const uint8 *data, uint16 len, PICC_EventType_e withAck,
+                            uint8 channelId)
 {
     PICC_MsgHeader_t header;
     sint8 ret;
@@ -489,36 +500,41 @@ sint8 PICC_ServiceResponseSend(uint8 consumerId, uint8 methodId,
  */
 sint8 PICC_ServiceProcessMessage(const PICC_MsgHeader_t *header,
                                  const uint8 *payload, uint16 len,
-                                 uint8 instanceId, uint8 channelId)
+                                 uint8 instanceId, uint8 channelId,
+                                 uint8 *cbResult, uint16 *cbResultLen)
 {
     if (header == NULL) {
         HANDLE_ERROR(-27);  /* Service: ProcessMessage header is NULL */
         return -1;
     }
 
+    /* Default: no callback result */
+    if (cbResultLen != NULL) {
+        *cbResultLen = 0U;
+    }
+
     switch (header->msgType) {
         /* Event notification */
         case (uint8)PICC_MSG_NOTIFICATION_WITH_ACK:
         case (uint8)PICC_MSG_NOTIFICATION_WITHOUT_ACK:
-            return PICC_ServiceHandleEvent(header, payload, len, instanceId, channelId);
+            return PICC_ServiceHandleEvent(header, payload, len, instanceId, channelId,
+                                           cbResult, cbResultLen);
 
         /* Method request */
         case (uint8)PICC_MSG_REQUEST:
         case (uint8)PICC_MSG_REQUEST_NO_RETURN_WITH_ACK:
         case (uint8)PICC_MSG_REQUEST_NO_RETURN_WITHOUT_ACK:
-            return PICC_ServiceHandleRequest(header, payload, len, instanceId, channelId);
+            return PICC_ServiceHandleRequest(header, payload, len, instanceId, channelId,
+                                             cbResult, cbResultLen);
 
         /* Method response */
         case (uint8)PICC_MSG_RESPONSE:
             return PICC_ServiceHandleResponse(header, payload, len);
 
-        /* ACK messages - handled automatically by middleware, not reported to app layer */
+        /* ACK messages - handled automatically */
         case (uint8)PICC_MSG_ACK:
         case (uint8)PICC_MSG_EVENT_ACK:
             break;
-
-        /* Note: PICC_MSG_LINK_AVAILABLE is handled by PICC_ProcessSingleMessage in picc_api.c
-         * before this function is called, so no need to handle it here. */
 
         default:
             break;

@@ -104,3 +104,20 @@ Payload	yy yy	服务端响应数据
 ...	...	(其余字段与请求保持一致)
 (Note: The MessageType description in this table has been corrected from REQUEST to RESPONSE to align with the hex value 0x80 and the protocol specification.)
 
+ 组包格式说明
+
+第一字节是CRC使能位，0代表使能，1代表非使能
+• 后面是N个私有协议数据包
+• 2字节的counter，每个通道上独立累计计算
+最后2字节是CRC,计算前面所有数据的CRC16
+1Byte	NByte	NByte	NByte	2Byte	2Byte
+CRC使能位	私有协议包1	私有协议包2	...	Counter	CRC
+
+
+
+以下为电源管理的时序：
+Method/Event ID： 1  M-->A   01 01 06 01 08 00 00 01 04
+Method/Event ID： 2  A-->M   01 02 06 00 07 00 00 02 03 04
+Method/Event ID： 8  A-->M   01 08 06 00 07 00 00 01 03
+Method/Event ID： 4  M-->A   01 04 06 02 08 00 00 02 03 03
+Method/Event ID： 11 A-->M   01 0B 06 00 07 00 00 02 03 00

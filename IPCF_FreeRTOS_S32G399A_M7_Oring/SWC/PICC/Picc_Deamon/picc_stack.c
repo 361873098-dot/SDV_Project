@@ -146,6 +146,12 @@ static sint8 PICC_StackDoSendForChannel(uint8 channelId)
     /* [DEBUG] Record TX data for TRACE32 observation (before send attempt) */
     PICC_TraceTx(inst->config.channelId, shmBuf, totalLen);
 
+#if (PICC_DIAG_RECORD_ENABLE == 1U)
+    /* Record TX data to diagnostic buffer (excludes heartbeat) */
+    extern void PICC_DiagRecordAddTx(const uint8 *data, uint32 len);
+    PICC_DiagRecordAddTx(shmBuf, totalLen);
+#endif
+
     /* Send */
     /* Note: Assumes ipc_shm_tx is fast enough and non-blocking */
     err = ipc_shm_tx(IPCF_INSTANCE0, inst->config.channelId, shmBuf, totalLen);

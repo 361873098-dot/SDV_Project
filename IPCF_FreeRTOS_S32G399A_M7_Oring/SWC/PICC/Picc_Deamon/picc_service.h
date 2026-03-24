@@ -45,28 +45,34 @@ typedef enum {
 /**
  * @brief Event receive callback function type
  * 
- * @param[in] providerId  Service provider ID
- * @param[in] eventId     Event ID
- * @param[in] data        Data
- * @param[in] len         Data length
+ * @param[in]  providerId   Service provider ID
+ * @param[in]  eventId      Event ID
+ * @param[in]  data         A-core event data
+ * @param[in]  len          Data length
+ * @param[out] cbResult     Buffer for callback-produced result (max 8 bytes)
+ * @param[out] cbResultLen  Actual callback result length written
  */
 typedef void (*PICC_EventCallback_t)(uint8 providerId, uint8 eventId,
-                                     const uint8 *data, uint16 len);
+                                     const uint8 *data, uint16 len,
+                                     uint8 *cbResult, uint16 *cbResultLen);
 
 /**
  * @brief Method request callback function type (Server role)
  * 
- * @param[in]  consumerId  Requester ID
- * @param[in]  methodId    Method ID
- * @param[in]  reqData     Request data
- * @param[in]  reqLen      Request data length
- * @param[out] rspData     Response data buffer
- * @param[out] rspLen      Response data length
+ * @param[in]  consumerId   Requester ID
+ * @param[in]  methodId     Method ID
+ * @param[in]  reqData      Request data
+ * @param[in]  reqLen       Request data length
+ * @param[out] rspData      Response data buffer
+ * @param[out] rspLen       Response data length
+ * @param[out] cbResult     Buffer for callback-produced result (max 8 bytes)
+ * @param[out] cbResultLen  Actual callback result length written
  * @return Return code @see PICC_ReturnCode_e
  */
 typedef uint8 (*PICC_MethodCallback_t)(uint8 consumerId, uint8 methodId,
                                        const uint8 *reqData, uint16 reqLen,
-                                       uint8 *rspData, uint16 *rspLen);
+                                       uint8 *rspData, uint16 *rspLen,
+                                       uint8 *cbResult, uint16 *cbResultLen);
 
 /**
  * @brief Method response callback function type (Client role)
@@ -149,15 +155,18 @@ sint8 PICC_ServiceResponseSend(uint8 consumerId, uint8 methodId,
  * Dispatches to corresponding handler based on message type, auto replies ACK.
  * 
  * @param[in] header     Message header
- * @param[in] payload    Payload data
- * @param[in] len        Payload length
- * @param[in] instanceId Receive instance ID
- * @param[in] channelId  Receive channel ID
+ * @param[in]  payload     Payload data
+ * @param[in]  len         Payload length
+ * @param[in]  instanceId  Receive instance ID
+ * @param[in]  channelId   Receive channel ID
+ * @param[out] cbResult    Buffer for callback result (may be NULL)
+ * @param[out] cbResultLen Callback result length (may be NULL)
  * @return 0 on success, non-zero on failure
  */
 sint8 PICC_ServiceProcessMessage(const PICC_MsgHeader_t *header,
                                  const uint8 *payload, uint16 len,
-                                 uint8 instanceId, uint8 channelId);
+                                 uint8 instanceId, uint8 channelId,
+                                 uint8 *cbResult, uint16 *cbResultLen);
 
 /**
  * @brief Register Event receive handler (supports multi-module registration)
@@ -186,8 +195,8 @@ sint8 PICC_RegisterMethodHandler(uint8 localProviderId, PICC_MethodCallback_t ca
 sint8 PICC_RegisterResponseHandler(PICC_ResponseCallback_t callback);
 
 /**
- * @brief Send Event notification
- * 
+ * @brief Send Event notification (internal service layer function)
+ *
  * @param[in] providerId  Sender's ProviderID
  * @param[in] eventId     Event ID
  * @param[in] consumerId  Target client ID
@@ -197,9 +206,9 @@ sint8 PICC_RegisterResponseHandler(PICC_ResponseCallback_t callback);
  * @param[in] channelId   IPCF channel ID
  * @return 0 on success, non-zero on failure
  */
-sint8 PICC_SendEvent(uint8 providerId, uint8 eventId, uint8 consumerId,
-                     const uint8 *data, uint16 len, PICC_EventType_e withAck,
-                     uint8 channelId);
+sint8 PICC_ServiceEventSend(uint8 providerId, uint8 eventId, uint8 consumerId,
+                            const uint8 *data, uint16 len, PICC_EventType_e withAck,
+                            uint8 channelId);
 
 #if defined(__cplusplus)
 }

@@ -296,6 +296,9 @@ void OsTask_Creation_All(void)
 {
     BaseType_t os_status;
 
+    /* Initialize Power Management Application with PICC */
+    Pwsm_Init();
+
     /* ========================================================================
      * 1. Unified 1ms periodic task
      *    Drives: 1ms, 2ms, 5ms period groups
