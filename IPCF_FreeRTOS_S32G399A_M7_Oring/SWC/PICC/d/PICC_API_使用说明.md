@@ -425,3 +425,89 @@ A核数据到达 → PICC_StoreToMailbox(payload)  ─── 覆盖存入槽位 
 ## 6. 兼容性总结
 
 `PICC_Init()` 配置接口和 `PICC_Get*Data()` 拉取接口设计为**完全且一致地屏蔽了底层差异**。无论业务对延迟的诉求如何，均可保持主干代码风格统一，极大程度避免在应用层大量维护外部共享标志位，提高高复用性核间通信的使用体验。
+
+---
+
+## 7. 常见关键疑问解答 (FAQ)
+
+### Q1：我在 `PICC_Init()` 中注册了 `methodHandler` 或者 `eventHandler` 回调函数，那么在我的周期主函数里，**还能/还需要**调用 `PICC_GetEventData` 或 `PICC_GetMethodData` 进行轮询吗？
+
+**答：绝对可以，并且非常推荐这么做（这就是设计的精髓）！**
+
+底层信箱的机制是**“数据装填”与“回调执行”双管齐下**。
+当硬件中断触发、A核的数据瞬间到达时，底层系统会执行两件事：
+1. 立马把 A 核传来的**“原始特征数据”**（Payload）塞进信箱槽位。
+2. 触发你注册的 `Handler` 回调。你在回调里可以通过指针写入 `cbResult`，随后底层也会把你写好的这段 `cbResult` 追加塞进上述那个同一个信箱槽位！
+
+完成这两步后，中断退出。
+
+**这意味着：**即便你注册了 Callback（用于处理一些对时间极度敏感的硬件计算，例如抓拍一条系统时间戳），这批数据依然被完好地封存在信箱中等待回收。
+随后当你的周期函数（如 10ms task）慢条斯理地执行到时，你**依然可以并且应当**去调用 `PICC_GetEventData` 或 `PICC_GetMethodData`。
+这个时候你不仅能原封不动地拿到 A核 发来的 `data`，还能从出参 `cbResult` 中完美提取出刚才在中断的回调里顺手帮你算好的“附加结果”。这彻底免去了你在应用层到处定义 `extern volatile` 全局变量来做跨任务通信的痛苦。
+
+**👇 核心极简示范（以 Event 为例）：**
+```c
+/* 1. 这是你注册在 PICC_Init 中的回调函数（运行在中断级别） */
+static void My_EventHandler(uint8 providerId, uint8 eventId,
+                            const uint8 *data, uint16 len,
+                            uint8 *cbResult, uint16 *cbResultLen)
+{
+    /* 来报文的瞬间，我只需要做一件对时间极其敏感的事：抓一个当前微秒级时间戳 */
+    uint32 hw_timestamp = STM_GetCounter();
+    
+    /* 写入到 cbResult 随身包里，底层信箱会替你保管它，供后面主任务提取！ */
+    cbResult[0] = (uint8)(hw_timestamp >> 24);
+    cbResult[1] = (uint8)(hw_timestamp >> 16);
+    cbResult[2] = (uint8)(hw_timestamp >> 8);
+    cbResult[3] = (uint8)(hw_timestamp);
+    *cbResultLen = 4U; 
+}
+
+/* 2. 你的 10ms 慢速业务死循环任务（运行在 OS Task 级别） */
+void My_PeriodicTask(void)
+{
+    uint8 rxData[32];   uint16 rxLen;
+    uint8 myCbData[8];  uint16 myCbLen;
+    
+    /* 重点来了！哪怕你前面用了 Callback，你仍然在这里悠哉地调用 GetEventData */
+    if (PICC_GetEventData(PICC_APP_DIAG, 0x01, 
+                          rxData, sizeof(rxData), &rxLen, 
+                          myCbData, &myCbLen /* <- 关注这里 */) == PICC_E_OK) 
+    {
+        /* 一次 API 调用，你拿到了两样东西！ */
+        
+        // 1. A核原汁原味发过来的通讯原始报文 (rxData)
+        Process_A_Core_Message(rxData, rxLen);
+        
+        // 2. 刚才在中断里，你存进 cbResult 的那个微秒级机器时间戳！(myCbData)
+        // 跨任务通信连个全局变量都不用定义，是不是爽爆了？
+        uint32 fast_timestamp = (myCbData[0] << 24) | (myCbData[1] << 16) | (myCbData[2] << 8) | myCbData[3];
+        Sync_System_Time(fast_timestamp);
+    }
+}
+```
+
+---
+
+### Q2：`PICC_MethodResponse` 到底要在什么场景下使用？是否必须和 `PICC_GetMethodData` 成对出现？
+
+**答：取决于你初始化时有没有注册回调函数。**
+
+**场景 1：`methodHandler = NULL`（纯轮询模式）**
+- **是！必须严格成对使用。**
+- 流程：使用 `PICC_GetMethodData` 获取请求 ➔ 执行业务 ➔ 必须立刻调用 `PICC_MethodResponse` 回复结果，否则对端会超时死锁。
+
+**场景 2：注册了 `methodHandler` 回调函数（如 OTA 示例）**
+- **否！绝对不能成对使用，千万不要手动调 `PICC_MethodResponse`。**
+- 流程：中断触发回调 ➔ 你在这时填好出参 ➔ **底层立刻全自动替你发送 Response** ➔ 通讯正式结束。如果你在周期任务轮询 `PICC_GetMethodData` 后再去调一遍 `PICC_MethodResponse`，会导致严重重复发包导致系统崩溃。
+
+---
+
+### Q3：`methodHandler` 和 `eventHandler` 这两个回调函数的执行时间最大不能超过多少？可以调用系统 API 吗？
+
+**答：必须极度精简！执行时间严禁超过 50 微秒 (50us)！绝对禁止调用任何带有阻塞性质的 OS API！**
+
+由于这两个回调函数是**直接运行在底层 IPCF 硬件 RX 接收中断服务程序（ISR context）**中的，这赋予了你处理纳秒/微秒级急迫任务（例如对齐时钟时间戳）的权利，但也带来了极高的系统责任：
+
+1. **执行时间极值**：代码必须非常简短，通常只是几条变量赋值、读取一下外设寄存器、或者简单的内存拷贝操作。**整体耗时必须控制在 50us 以内**。千万不能在这里执行耗时的工作（例如：Flash擦写逻辑、死循环等待设备响应、大量的复杂数学运算等！）。如果遇到这些需要耗时的操作，请把 A 核的指令通过 `cbResult`（或者纯轮询模式）带出来，回抛到外部的 **10ms OS 周期的应用层代码里面去慢慢算**。
+2. **严禁调用阻塞 API（极其致命）**：在中断上下文中，**绝对不允许**调用 `vTaskDelay`、申请带 Wait 时间的 Semaphore/Mutex 等一切会引起 OS 上下文挂起的接口。一旦你在里面把 M 核心死锁了或休眠了，整个 FreeRTOS 调度器和其它所有外设的后续中断响应都会瞬间瘫痪，继而直接触发硬件看门狗复位或系统严重假死。
