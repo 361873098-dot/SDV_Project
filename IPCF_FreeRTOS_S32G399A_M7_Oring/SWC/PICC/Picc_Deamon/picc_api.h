@@ -136,9 +136,15 @@ typedef struct {
  *
  *
  * @par Callback Documentation:
- * When initializing PICC_Init(), you can pass callback functions in 'config'. The signatures 
- * and exact parameter meanings are documented below:
- *
+ * When initializing PICC_Init(), you can pass callback functions in 'config'. 
+ * 
+ * @warning ⚠️ ISR CONTEXT EXECUTION WARNING ⚠️
+ *          Both `methodHandler` and `eventHandler` run directly within the IPCF hardware 
+ *          RX Interrupt Service Routine (ISR) context.
+ *          Application implementations MUST adhere to the following strict rules:
+ *          1. **MAX EXECUTION TIME**: Must not exceed 50 microseconds.
+ *          2. **NO BLOCKING**: Absolutely NO blocking OS calls (e.g., vTaskDelay, blocking on Semaphores/Mutexes, infinite loops).
+ *          3. **PURPOSE**: Only use for instant hardware capture (e.g., timestamps) or rapid non-blocking state/variable updates.
  * @par eventHandler Signature:
  * `void My_EventHandler(uint8 providerId, uint8 eventId, const uint8 *data, uint16 len, uint8 *cbResult, uint16 *cbResultLen)`
  *  - @b providerId : [Input] The A-Core Server's Provider ID that broadcasted this event.

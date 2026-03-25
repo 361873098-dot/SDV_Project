@@ -517,6 +517,29 @@ sint8 PICC_LinkHandleDisconnect(const PICC_MsgHeader_t *header,
 
     ctx = PICC_GetLinkContext(instanceId, channelId);
     if (ctx != NULL) {
+        /* [FIX] Validate ProviderID/ConsumerID match before processing disconnect.
+         * Without this check, a disconnect from another app (e.g. DiagMgmt 0x51/0x5B)
+         * on the same IPCF channel would incorrectly disconnect this link context
+         * (e.g. Power Management 0x01/0x06), breaking the shutdown sequence.
+         *
+         * Protocol spec: ProviderID = Server ID, ConsumerID = Client ID (stable per pairing)
+         */
+        boolean idMatch = FALSE;
+        if (ctx->config.role == PICC_ROLE_SERVER) {
+            /* SERVER: localId = ProviderID, remoteId = ConsumerID */
+            idMatch = (header->providerId == ctx->config.localId &&
+                       header->consumerId == ctx->config.remoteId) ? TRUE : FALSE;
+        } else {
+            /* CLIENT: localId = ConsumerID, remoteId = ProviderID */
+            idMatch = (header->providerId == ctx->config.remoteId &&
+                       header->consumerId == ctx->config.localId) ? TRUE : FALSE;
+        }
+
+        if (idMatch == FALSE) {
+            /* Not for this connection pair, ignore silently */
+            return 0;
+        }
+
         if (linkPayload->subType == (uint8)PICC_LINK_DISCONNECT) {
             
             /* [R5] Received disconnect notification (ReturnCode usually 0x01) */
