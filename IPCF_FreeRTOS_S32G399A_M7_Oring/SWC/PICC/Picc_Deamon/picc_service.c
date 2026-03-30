@@ -16,7 +16,7 @@ extern "C" {
 #include "picc_service.h"
 #include "picc_link.h"
 #include "picc_stack.h"
-#include "Picc_main.h"    /* For HANDLE_ERROR */
+#include "Picc_main.h"    /* For PICC_HANDLE_ERROR */
 #include "ipc-shm.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -104,13 +104,13 @@ static sint8 PICC_ServiceSendAck(uint8 msgType, uint8 providerId, uint8 consumer
 
     packedLen = PICC_PackMessage(txBuf, sizeof(txBuf), &header, NULL, 0U);
     if (packedLen == 0U) {
-        HANDLE_ERROR(-11);  /* Service: Failed to pack ACK message */
+        PICC_HANDLE_ERROR(-11);  /* Service: Failed to pack ACK message */
         return -1;
     }
 
     ret = PICC_StackAddMessageToChannel(channelId, txBuf, packedLen);
     if (ret != 0) {
-        HANDLE_ERROR(-12);  /* Service: Failed to add ACK to stack */
+        PICC_HANDLE_ERROR(-12);  /* Service: Failed to add ACK to stack */
     }
     return ret;
 }
@@ -129,7 +129,7 @@ static sint8 PICC_ServiceSendMessage(const PICC_MsgHeader_t *header,
     sint8 ret;
     
     if (header == NULL) {
-        HANDLE_ERROR(-13);  /* Service: SendMessage header is NULL */
+        PICC_HANDLE_ERROR(-13);  /* Service: SendMessage header is NULL */
         return -1;
     }
     
@@ -140,7 +140,7 @@ static sint8 PICC_ServiceSendMessage(const PICC_MsgHeader_t *header,
     packedLen = PICC_PackMessage(g_txBuffer, sizeof(g_txBuffer), header, payload, payloadLen);
     if (packedLen == 0U) {
         taskEXIT_CRITICAL();
-        HANDLE_ERROR(-14);  /* Service: Failed to pack message */
+        PICC_HANDLE_ERROR(-14);  /* Service: Failed to pack message */
         return -1;
     }
     
@@ -149,7 +149,7 @@ static sint8 PICC_ServiceSendMessage(const PICC_MsgHeader_t *header,
     taskEXIT_CRITICAL();
     
     if (ret != 0) {
-        HANDLE_ERROR(-15);  /* Service: Failed to add message to stack */
+        PICC_HANDLE_ERROR(-15);  /* Service: Failed to add message to stack */
     }
     return ret;
 }
@@ -320,7 +320,7 @@ sint8 PICC_RegisterEventHandler(uint8 providerId, PICC_EventCallback_t callback)
     uint32 i;
     
     if (callback == NULL) {
-        HANDLE_ERROR(-16);  /* Service: Event handler callback is NULL */
+        PICC_HANDLE_ERROR(-16);  /* Service: Event handler callback is NULL */
         return -1;
     }
     
@@ -334,7 +334,7 @@ sint8 PICC_RegisterEventHandler(uint8 providerId, PICC_EventCallback_t callback)
         }
     }
     
-    HANDLE_ERROR(-17);  /* Service: Event handler registry full */
+    PICC_HANDLE_ERROR(-17);  /* Service: Event handler registry full */
     return -2;  /* Registry full */
 }
 
@@ -346,7 +346,7 @@ sint8 PICC_RegisterMethodHandler(uint8 localProviderId, PICC_MethodCallback_t ca
     uint32 i;
     
     if (callback == NULL) {
-        HANDLE_ERROR(-18);  /* Service: Method handler callback is NULL */
+        PICC_HANDLE_ERROR(-18);  /* Service: Method handler callback is NULL */
         return -1;
     }
     
@@ -360,7 +360,7 @@ sint8 PICC_RegisterMethodHandler(uint8 localProviderId, PICC_MethodCallback_t ca
         }
     }
     
-    HANDLE_ERROR(-19);  /* Service: Method handler registry full */
+    PICC_HANDLE_ERROR(-19);  /* Service: Method handler registry full */
     return -2;  /* Registry full */
 }
 
@@ -388,7 +388,7 @@ sint8 PICC_ServiceEventSend(uint8 providerId, uint8 eventId, uint8 consumerId,
     sint8 ret;
 
     if (g_serviceInitialized == FALSE) {
-        HANDLE_ERROR(-20);  /* Service: Not initialized for SendEvent */
+        PICC_HANDLE_ERROR(-20);  /* Service: Not initialized for SendEvent */
         return -1;
     }
 
@@ -403,7 +403,7 @@ sint8 PICC_ServiceEventSend(uint8 providerId, uint8 eventId, uint8 consumerId,
 
     ret = PICC_ServiceSendMessage(&header, data, len, channelId);
     if (ret != 0) {
-        HANDLE_ERROR(-21);  /* Service: SendEvent failed */
+        PICC_HANDLE_ERROR(-21);  /* Service: SendEvent failed */
     }
     return ret;
 }
@@ -423,7 +423,7 @@ uint8 PICC_ServiceMethodSend(uint8 providerId, uint8 methodId,
     (void)instanceId;
 
     if (g_serviceInitialized == FALSE) {
-        HANDLE_ERROR(-22);  /* Service: Not initialized for MethodSend */
+        PICC_HANDLE_ERROR(-22);  /* Service: Not initialized for MethodSend */
         return 0U;
     }
 
@@ -446,13 +446,13 @@ uint8 PICC_ServiceMethodSend(uint8 providerId, uint8 methodId,
             header.msgType = (uint8)PICC_MSG_REQUEST_NO_RETURN_WITHOUT_ACK;
             break;
         default:
-            HANDLE_ERROR(-23);  /* Service: Invalid method type */
+            PICC_HANDLE_ERROR(-23);  /* Service: Invalid method type */
             return 0U;
     }
 
     ret = PICC_ServiceSendMessage(&header, data, len, channelId);
     if (ret != 0) {
-        HANDLE_ERROR(-24);  /* Service: MethodSend failed */
+        PICC_HANDLE_ERROR(-24);  /* Service: MethodSend failed */
         return 0U;
     }
 
@@ -473,7 +473,7 @@ sint8 PICC_ServiceResponseSend(uint8 consumerId, uint8 methodId,
     (void)instanceId;
 
     if (g_serviceInitialized == FALSE) {
-        HANDLE_ERROR(-25);  /* Service: Not initialized for ResponseSend */
+        PICC_HANDLE_ERROR(-25);  /* Service: Not initialized for ResponseSend */
         return -1;
     }
 
@@ -486,7 +486,7 @@ sint8 PICC_ServiceResponseSend(uint8 consumerId, uint8 methodId,
 
     ret = PICC_ServiceSendMessage(&header, data, len, channelId);
     if (ret != 0) {
-        HANDLE_ERROR(-26);  /* Service: ResponseSend failed */
+        PICC_HANDLE_ERROR(-26);  /* Service: ResponseSend failed */
     }
     return ret;
 }
@@ -504,7 +504,7 @@ sint8 PICC_ServiceProcessMessage(const PICC_MsgHeader_t *header,
                                  uint8 *cbResult, uint16 *cbResultLen)
 {
     if (header == NULL) {
-        HANDLE_ERROR(-27);  /* Service: ProcessMessage header is NULL */
+        PICC_HANDLE_ERROR(-27);  /* Service: ProcessMessage header is NULL */
         return -1;
     }
 

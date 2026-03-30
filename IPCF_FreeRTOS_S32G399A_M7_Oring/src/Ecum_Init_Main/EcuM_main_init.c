@@ -43,6 +43,7 @@ extern "C" {
 #include "Pmic_driver_main.h"
 #include "TJA1145A_Spi_Baremetal.h"
 #include "picc_main.h"
+#include "pwsm.h"
 
 /* FreeRTOS headers */
 #include "FreeRTOS.h"
@@ -59,6 +60,22 @@ extern "C" {
 #define FLEXCAN_INST 0U
 
 /*==================================================================================================
+ *                                  PRIVATE FUNCTION DECLARATIONS
+ *==================================================================================================*/
+
+static void App_Init_All(void);
+
+/*==================================================================================================
+ *                                  PRIVATE FUNCTION DEFINITIONS
+ *==================================================================================================*/
+
+static void App_Init_All(void)
+{
+  /* Register application-level PICC endpoints after middleware is ready. */
+  Pwsm_Init();
+}
+
+/*==================================================================================================
  *                                         main()
  * Entry
  *==================================================================================================*/
@@ -70,7 +87,8 @@ extern "C" {
  *   Phase 1 (PreOS): Hardware drivers — no RTOS dependency
  *   Phase 2 (PreOS): Communication middleware — creates IPCF softirq task
  *                     (valid before scheduler) and registers callbacks
- *   Phase 3 (PostOS): Creates application tasks and starts scheduler
+ *   Phase 3 (PreOS): Application initialization on top of middleware
+ *   Phase 4 (PostOS): Creates application tasks and starts scheduler
  */
 int main(void) {
   /* ==================================================================
@@ -91,8 +109,6 @@ int main(void) {
 
   /* Initialize pins */
   Port_Init(NULL_PTR);
-
-  //Siul2_Port_Ip_Init(NUM_OF_CONFIGURED_PINS, g_pin_mux_InitConfigArr);
 
   /* Initialize I2c driver */
   I2c_Init(NULL_PTR);
@@ -133,7 +149,16 @@ int main(void) {
   PICC_PreOS_Init();
 
   /* ==================================================================
-   * Phase 3: PostOS — Create Tasks & Start Scheduler
+    * Phase 3: PreOS — Application Initialization
+    *
+    * App_Init_All() performs:
+    *   - Registers application-level communication endpoints
+    *   - Keeps application initialization out of task creation
+    * ================================================================== */
+    App_Init_All();
+
+    /* ==================================================================
+    * Phase 4: PostOS — Create Tasks & Start Scheduler
    *
    * OsTask_Creation_All() creates:
    *   - OS_10ms    (priority 2): Unified periodic task

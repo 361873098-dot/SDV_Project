@@ -121,11 +121,14 @@ sint8 PICC_MailboxGetMethodData(PICC_AppIndex_e appIndex, uint8 methodId,
 /**
  * @brief Read Method response data from mailbox
  *
+ * @param[in]  sessionId   Session ID returned by PICC_MethodRequest().
+ *                          Used to match the correct async response.
+ *                          Pass 0 to match any session (legacy compatible).
  * @param[out] cbResult    Optional callback result buffer (NULL to ignore)
  * @param[out] cbResultLen Optional callback result length (NULL to ignore)
  */
 sint8 PICC_MailboxGetResponseData(PICC_AppIndex_e appIndex, uint8 methodId,
-                                  uint8 *returnCode,
+                                  uint8 sessionId, uint8 *returnCode,
                                   uint8 *data, uint16 maxLen, uint16 *actualLen,
                                   uint8 *cbResult, uint16 *cbResultLen);
 

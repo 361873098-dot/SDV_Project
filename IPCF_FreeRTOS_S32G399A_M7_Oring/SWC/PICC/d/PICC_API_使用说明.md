@@ -1,18 +1,7 @@
 # PICC API 使用说明
 
-## 📌 v2.0 重要简化更新
 
-从 v2.0 版本开始，所有发送 API 已大幅简化：
 
-**之前（v1.x）**：
-```c
-// 需要手动传递 7-8 个参数，包括 providerId, consumerId, instanceId, channelId
-PICC_SendEvent(0x61, 0x02U, 0x66, data, len, PICC_EVENT_WITHOUT_ACK, 1U);
-PICC_MethodRequest(0x16, 0x02U, data, 2U, PICC_METHOD_WITH_RESPONSE, 0, 2U);
-PICC_MethodResponse(0x06, 2U, sessionId, 0x00, rspData, 1, 0, 2U);
-```
-
-**现在（v2.0）**：
 ```c
 // 只需传递 appIndex，驱动自动从 PICC_Init() 配置中获取 ID 和 channelId
 PICC_SendEvent(PICC_APP_TIMESYNC, 0x02U, data, len, PICC_EVENT_WITHOUT_ACK);
@@ -100,7 +89,6 @@ typedef struct {
     uint8                    remoteId;          /* 对端 ID (对端的 ProviderID 或 ConsumerID) */
     PICC_Role_e              role;              /* PICC_ROLE_SERVER 或 PICC_ROLE_CLIENT */
     uint8                    channelId;         /* IPCF 通道号 (1 或 2) */
-    PICC_LinkStateCallback_t linkStateCallback; /* 链路状态回调（可为 NULL） */
     PICC_MethodCallback_t    methodHandler;     /* Method 请求回调（可为 NULL） */
     PICC_EventCallback_t     eventHandler;      /* Event 通知回调（可为 NULL） */
 } PICC_AppConfig_t;
@@ -126,22 +114,11 @@ typedef enum {
 } PICC_AppIndex_e;
 ```
 
-### 3.2 三个回调字段说明
+### 3.2 两个回调字段说明
 
-三个回调字段均为**可选**。传 `NULL` 表示使用**纯轮询模式**，传函数指针表示使用**即时回调模式**。  
+两个回调字段均为**可选**。传 `NULL` 表示使用**纯轮询模式**，传函数指针表示使用**即时回调模式**。  
 **两种模式可以无缝结合**：邮箱始终存储 A 核原始数据，如果注册了回调，回调产生的结果也会自动存入邮箱。  
 **应用层统一通过 `PICC_Get*Data()` 获取全部数据**（既包含 A 核请求/事件原始数据，也包含回调执行后输出的结果 `cbResult`）。
-
-#### linkStateCallback（链路状态回调）
-
-| 传值 | 行为 |
-|------|------|
-| `NULL` | 通过 `PICC_GetLinkState()` 轮询 |
-| 函数指针 | 链路变化时立刻调用 |
-
-```c
-typedef void (*PICC_LinkStateCallback_t)(uint8 remoteId, PICC_LinkState_e state);
-```
 
 #### methodHandler（Method 请求回调）
 
@@ -177,6 +154,50 @@ typedef void (*PICC_EventCallback_t)(uint8 providerId, uint8 eventId,
 sint8 PICC_GetMethodData(appIndex, methodId, data, maxLen, &len, cbResult, &cbLen);
 sint8 PICC_GetResponseData(appIndex, methodId, &retCode, data, maxLen, &len, cbResult, &cbLen);
 sint8 PICC_GetEventData(appIndex, eventId, data, maxLen, &len, cbResult, &cbLen);
+PICC_LinkState_e PICC_GetLinkState(channelId);
+```
+
+`PICC_GetLinkState()` 是公开的 polling API，用于按通道查询当前链路状态：
+
+1. `PICC_LINK_STATE_DISCONNECTED`
+2. `PICC_LINK_STATE_CONNECTING`
+3. `PICC_LINK_STATE_CONNECTED`
+
+说明：
+
+1. 发送类 API 内部已经自动检查链路状态，未连接时会直接返回失败。
+2. 因此应用层通常不需要在每次发送前自行检查链路。
+3. 只有当业务确实需要根据链路状态做自己的流程分支时，才需要调用 `PICC_GetLinkState()`。
+
+示例：
+
+```c
+PICC_LinkState_e linkState;
+
+linkState = PICC_GetLinkState(PWR_CHANNEL_ID);
+
+if (linkState == PICC_LINK_STATE_CONNECTED) {
+    /* 链路已建立，可继续执行依赖对端在线的业务逻辑 */
+} else if (linkState == PICC_LINK_STATE_CONNECTING) {
+    /* 链路正在建立，通常保持等待或进入重试/降级状态 */
+} else {
+    /* PICC_LINK_STATE_DISCONNECTED */
+    /* 链路未建立，可跳过本周期发送或记录本地状态 */
+}
+```
+
+上面这个示例适用于“业务流程分支控制”。如果只是单纯发送报文，则通常不需要先调用它，例如：
+
+```c
+sint8 ret;
+uint8 payload[1] = { (uint8)PWR_STATE_STANDBY };
+
+ret = PICC_SendEvent(PICC_APP_PWR, PWR_EVENT_STATE_NOTIFY,
+                     payload, 1U, PICC_EVENT_WITH_ACK);
+
+if (ret == PICC_E_NOT_CONNECTED) {
+    /* 发送接口内部已经完成链路检查，这里按失败处理即可 */
+}
 ```
 
 ---
@@ -198,7 +219,6 @@ void Pwsm_Init(void)
         .remoteId          = PWR_CONSUMER_ID,     /* 0x06 */
         .role              = PICC_ROLE_SERVER,
         .channelId         = PWR_CHANNEL_ID,      /* 2 */
-        .linkStateCallback = NULL,
         .methodHandler     = NULL,  /* 纯轮询模式，无需回调 */
         .eventHandler      = NULL   /* 纯轮询模式，无需回调 */
     };
@@ -234,7 +254,29 @@ void Pwsm_CommEvent(void)  /* 10ms 周期任务 */
 }
 ```
 
-### 4.2 场景二：Event 回调 + 统一读取（时钟同步时间戳模型）
+### 4.2 场景二：链路状态 polling（业务按需查询）
+
+如果某个业务模块确实需要根据链路状态做本地分支控制，可以直接查询 `PICC_GetLinkState()`。
+
+```c
+void Comm_Main(void)
+{
+    if (PICC_GetLinkState(COMM_CHANNEL_ID) != PICC_LINK_STATE_CONNECTED) {
+        /* 链路未建立时，不发业务报文或进入降级处理 */
+        return;
+    }
+
+    /* 只有链路已连接时才执行业务收发 */
+}
+```
+
+这个示例体现的原则是：
+
+1. 链路状态通过 polling API 显式查询。
+2. 发送 API 内部已经做链路检查，因此这里只在业务需要分支控制时才调用。
+3. 这样可以保持 `PICC_AppConfig_t` 简洁，不为未使用的回调保留配置位。
+
+### 4.3 场景三：Event 回调 + 统一读取（时钟同步时间戳模型）
 
 回调中立刻采集硬件定时器戳写入 `cbResult`，随后周期任务无缝通过 `PICC_GetEventData()` 一并拿到 A 核数据和刚才记录的硬件回调结果（本地时间戳）。
 
@@ -261,7 +303,6 @@ void TimeSync_Init(void)
         .remoteId          = TIMESYNC_CONSUMER_ID,   /* 0x66 */
         .role              = PICC_ROLE_CLIENT,
         .channelId         = TIMESYNC_CHANNEL_ID,    /* 1 */
-        .linkStateCallback = NULL,
         .methodHandler     = NULL,
         .eventHandler      = TimeSync_EventHandler   /* 注册即时回调 */
     };
@@ -296,7 +337,7 @@ void TimeSync_Main(void)  /* 10ms 周期任务 */
 }
 ```
 
-### 4.3 场景三：Method 回调 + 统一读取（OTA 写闪存模型）
+### 4.4 场景四：Method 回调 + 统一读取（OTA 写闪存模型）
 
 ```c
 static uint8 OTA_MethodHandler(uint8 consumerId, uint8 methodId,
@@ -331,7 +372,6 @@ void OTA_Init(void)
         .remoteId          = OTA_CONSUMER_ID,     /* 0x16 */
         .role              = PICC_ROLE_SERVER,
         .channelId         = OTA_CHANNEL_ID,      /* 2 */
-        .linkStateCallback = NULL,
         .methodHandler     = OTA_MethodHandler,   /* <--- 在这里注册回调！ */
         .eventHandler      = NULL
     };
@@ -385,3 +425,89 @@ A核数据到达 → PICC_StoreToMailbox(payload)  ─── 覆盖存入槽位 
 ## 6. 兼容性总结
 
 `PICC_Init()` 配置接口和 `PICC_Get*Data()` 拉取接口设计为**完全且一致地屏蔽了底层差异**。无论业务对延迟的诉求如何，均可保持主干代码风格统一，极大程度避免在应用层大量维护外部共享标志位，提高高复用性核间通信的使用体验。
+
+---
+
+## 7. 常见关键疑问解答 (FAQ)
+
+### Q1：我在 `PICC_Init()` 中注册了 `methodHandler` 或者 `eventHandler` 回调函数，那么在我的周期主函数里，**还能/还需要**调用 `PICC_GetEventData` 或 `PICC_GetMethodData` 进行轮询吗？
+
+**答：绝对可以，并且非常推荐这么做（这就是设计的精髓）！**
+
+底层信箱的机制是**“数据装填”与“回调执行”双管齐下**。
+当硬件中断触发、A核的数据瞬间到达时，底层系统会执行两件事：
+1. 立马把 A 核传来的**“原始特征数据”**（Payload）塞进信箱槽位。
+2. 触发你注册的 `Handler` 回调。你在回调里可以通过指针写入 `cbResult`，随后底层也会把你写好的这段 `cbResult` 追加塞进上述那个同一个信箱槽位！
+
+完成这两步后，中断退出。
+
+**这意味着：**即便你注册了 Callback（用于处理一些对时间极度敏感的硬件计算，例如抓拍一条系统时间戳），这批数据依然被完好地封存在信箱中等待回收。
+随后当你的周期函数（如 10ms task）慢条斯理地执行到时，你**依然可以并且应当**去调用 `PICC_GetEventData` 或 `PICC_GetMethodData`。
+这个时候你不仅能原封不动地拿到 A核 发来的 `data`，还能从出参 `cbResult` 中完美提取出刚才在中断的回调里顺手帮你算好的“附加结果”。这彻底免去了你在应用层到处定义 `extern volatile` 全局变量来做跨任务通信的痛苦。
+
+**👇 核心极简示范（以 Event 为例）：**
+```c
+/* 1. 这是你注册在 PICC_Init 中的回调函数（运行在中断级别） */
+static void My_EventHandler(uint8 providerId, uint8 eventId,
+                            const uint8 *data, uint16 len,
+                            uint8 *cbResult, uint16 *cbResultLen)
+{
+    /* 来报文的瞬间，我只需要做一件对时间极其敏感的事：抓一个当前微秒级时间戳 */
+    uint32 hw_timestamp = STM_GetCounter();
+    
+    /* 写入到 cbResult 随身包里，底层信箱会替你保管它，供后面主任务提取！ */
+    cbResult[0] = (uint8)(hw_timestamp >> 24);
+    cbResult[1] = (uint8)(hw_timestamp >> 16);
+    cbResult[2] = (uint8)(hw_timestamp >> 8);
+    cbResult[3] = (uint8)(hw_timestamp);
+    *cbResultLen = 4U; 
+}
+
+/* 2. 你的 10ms 慢速业务死循环任务（运行在 OS Task 级别） */
+void My_PeriodicTask(void)
+{
+    uint8 rxData[32];   uint16 rxLen;
+    uint8 myCbData[8];  uint16 myCbLen;
+    
+    /* 重点来了！哪怕你前面用了 Callback，你仍然在这里悠哉地调用 GetEventData */
+    if (PICC_GetEventData(PICC_APP_DIAG, 0x01, 
+                          rxData, sizeof(rxData), &rxLen, 
+                          myCbData, &myCbLen /* <- 关注这里 */) == PICC_E_OK) 
+    {
+        /* 一次 API 调用，你拿到了两样东西！ */
+        
+        // 1. A核原汁原味发过来的通讯原始报文 (rxData)
+        Process_A_Core_Message(rxData, rxLen);
+        
+        // 2. 刚才在中断里，你存进 cbResult 的那个微秒级机器时间戳！(myCbData)
+        // 跨任务通信连个全局变量都不用定义，是不是爽爆了？
+        uint32 fast_timestamp = (myCbData[0] << 24) | (myCbData[1] << 16) | (myCbData[2] << 8) | myCbData[3];
+        Sync_System_Time(fast_timestamp);
+    }
+}
+```
+
+---
+
+### Q2：`PICC_MethodResponse` 到底要在什么场景下使用？是否必须和 `PICC_GetMethodData` 成对出现？
+
+**答：取决于你初始化时有没有注册回调函数。**
+
+**场景 1：`methodHandler = NULL`（纯轮询模式）**
+- **是！必须严格成对使用。**
+- 流程：使用 `PICC_GetMethodData` 获取请求 ➔ 执行业务 ➔ 必须立刻调用 `PICC_MethodResponse` 回复结果，否则对端会超时死锁。
+
+**场景 2：注册了 `methodHandler` 回调函数（如 OTA 示例）**
+- **否！绝对不能成对使用，千万不要手动调 `PICC_MethodResponse`。**
+- 流程：中断触发回调 ➔ 你在这时填好出参 ➔ **底层立刻全自动替你发送 Response** ➔ 通讯正式结束。如果你在周期任务轮询 `PICC_GetMethodData` 后再去调一遍 `PICC_MethodResponse`，会导致严重重复发包导致系统崩溃。
+
+---
+
+### Q3：`methodHandler` 和 `eventHandler` 这两个回调函数的执行时间最大不能超过多少？可以调用系统 API 吗？
+
+**答：必须极度精简！执行时间严禁超过 50 微秒 (50us)！绝对禁止调用任何带有阻塞性质的 OS API！**
+
+由于这两个回调函数是**直接运行在底层 IPCF 硬件 RX 接收中断服务程序（ISR context）**中的，这赋予了你处理纳秒/微秒级急迫任务（例如对齐时钟时间戳）的权利，但也带来了极高的系统责任：
+
+1. **执行时间极值**：代码必须非常简短，通常只是几条变量赋值、读取一下外设寄存器、或者简单的内存拷贝操作。**整体耗时必须控制在 50us 以内**。千万不能在这里执行耗时的工作（例如：Flash擦写逻辑、死循环等待设备响应、大量的复杂数学运算等！）。如果遇到这些需要耗时的操作，请把 A 核的指令通过 `cbResult`（或者纯轮询模式）带出来，回抛到外部的 **10ms OS 周期的应用层代码里面去慢慢算**。
+2. **严禁调用阻塞 API（极其致命）**：在中断上下文中，**绝对不允许**调用 `vTaskDelay`、申请带 Wait 时间的 Semaphore/Mutex 等一切会引起 OS 上下文挂起的接口。一旦你在里面把 M 核心死锁了或休眠了，整个 FreeRTOS 调度器和其它所有外设的后续中断响应都会瞬间瘫痪，继而直接触发硬件看门狗复位或系统严重假死。

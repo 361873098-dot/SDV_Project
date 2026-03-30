@@ -1,0 +1,116 @@
+; ============================================================================
+; Diagnostic Script: Verify DiagMgmt/HealthMgmt disconnect caused PWR link drop
+; ============================================================================
+; The RX buffer is circular: 20 rows, currentRow=2, totalRecords=22
+; Chronological order: [2],[3],...,[19],[0],[1]
+;
+; We need to verify: did a disconnect notification from another app
+; (DiagMgmt 0x51/0x5B or HealthMgmt 0x15/0x1A) arrive on channel 2
+; BEFORE Event ID 4 was attempted?
+; ============================================================================
+
+AREA.Create DIAG2
+AREA.view DIAG2
+AREA.Select DIAG2
+AREA.Clear DIAG2
+
+PRINT "=============================================================="
+PRINT " Link Disconnect Root Cause Analysis"
+PRINT "=============================================================="
+
+PRINT ""
+PRINT "--- [1] PICC Mailbox App Contexts (which apps use channel 2?) ---"
+
+; g_appContexts is static in picc_mailbox.c
+; Check all 10 app slots
+PRIVATE &i
+&i=0
+WHILE &i<10.
+(
+  PRIVATE &isReg
+  &isReg=Var.VALUE(g_appContexts[&i].isRegistered)
+  IF &isReg!=0
+  (
+    PRIVATE &lid &rid &role &ch
+    &lid=Var.VALUE(g_appContexts[&i].config.localId)
+    &rid=Var.VALUE(g_appContexts[&i].config.remoteId)
+    &role=Var.VALUE(g_appContexts[&i].config.role)
+    &ch=Var.VALUE(g_appContexts[&i].config.channelId)
+    PRINT "  App[" &i "] localId=0x" FORMAT.HEX(2.,&lid) " remoteId=0x" FORMAT.HEX(2.,&rid) " role=" &role " channelId=" &ch
+  )
+  &i=&i+1
+)
+
+PRINT ""
+PRINT "--- [2] RX Records in CHRONOLOGICAL order ---"
+PRINT "  (circular buffer: currentRow=2, totalRecords=22)"
+PRINT "  Order: [2],[3],...,[19],[0],[1]"
+PRINT ""
+
+; Read in chronological order
+PRIVATE &row &seq
+&seq=1
+&row=2
+WHILE &seq<=20.
+(
+  PRIVATE &pId &mId &cId &sId &msgType &retCode &lenHi &lenLo &p0
+  &pId=Var.VALUE(g_diagRecord_Debug.rx.buffer[&row][0])
+  &mId=Var.VALUE(g_diagRecord_Debug.rx.buffer[&row][1])
+  &cId=Var.VALUE(g_diagRecord_Debug.rx.buffer[&row][2])
+  &sId=Var.VALUE(g_diagRecord_Debug.rx.buffer[&row][3])
+  &msgType=Var.VALUE(g_diagRecord_Debug.rx.buffer[&row][4])
+  &retCode=Var.VALUE(g_diagRecord_Debug.rx.buffer[&row][5])
+  &lenHi=Var.VALUE(g_diagRecord_Debug.rx.buffer[&row][6])
+  &lenLo=Var.VALUE(g_diagRecord_Debug.rx.buffer[&row][7])
+  &p0=Var.VALUE(g_diagRecord_Debug.rx.buffer[&row][8])
+
+  ; Skip empty rows
+  IF (&pId!=0)||(&mId!=0)
+  (
+    PRIVATE &mark
+    &mark=""
+
+    ; Mark disconnect notifications
+    IF (&msgType==0)&&(&p0==2)
+    (
+      &mark=" <<<< DISCONNECT"
+    )
+
+    ; Mark Method ID 2/8 (power management flow)
+    IF (&pId==1)&&(&mId==2)
+    (
+      &mark=" <<<< METHOD_2 (PWR_STATE_ACK)"
+    )
+    IF (&pId==1)&&(&mId==8)
+    (
+      &mark=" <<<< METHOD_8 (PWR_EVENT_DONE)"
+    )
+    IF (&pId==1)&&(&mId==1)&&(&msgType==0x82)
+    (
+      &mark=" <<<< EVENT_ACK for Event1"
+    )
+
+    PRINT "  Seq" FORMAT.DECIMAL(2.,&seq) " RX[" FORMAT.DECIMAL(2.,&row) "] P=0x" FORMAT.HEX(2.,&pId) " M=0x" FORMAT.HEX(2.,&mId) " C=0x" FORMAT.HEX(2.,&cId) " S=0x" FORMAT.HEX(2.,&sId) " T=0x" FORMAT.HEX(2.,&msgType) " R=0x" FORMAT.HEX(2.,&retCode) " L=" (&lenHi*256.+&lenLo) " P0=0x" FORMAT.HEX(2.,&p0) &mark
+  )
+
+  &row=&row+1
+  IF &row>=20.
+    &row=0
+  &seq=&seq+1
+)
+
+PRINT ""
+PRINT "--- [3] g_appData Error Info ---"
+PRINT "  error_count = " Var.VALUE(g_appData.error_count)
+PRINT "  last_error  = " Var.VALUE(g_appData.last_error)
+PRINT "  last_rx_ch  = " Var.VALUE(g_appData.last_rx_ch)
+
+PRINT ""
+PRINT "=============================================================="
+PRINT " KEY QUESTION: Does a DISCONNECT (T=0x00 P0=0x02) appear"
+PRINT " AFTER METHOD_2 and BEFORE METHOD_8 in the sequence above?"
+PRINT " If yes, that disconnect set the link to DISCONNECTED,"
+PRINT " causing PICC_SendEvent for Event ID 4 to fail silently."
+PRINT "=============================================================="
+
+ENDDO

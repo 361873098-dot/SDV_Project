@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 #include "picc_protocol.h"
-#include "Picc_main.h"    /* For HANDLE_ERROR */
+#include "Picc_main.h"    /* For PICC_HANDLE_ERROR */
 
 /*==================================================================================================
  *                                         CRC16 Lookup Table
@@ -182,13 +182,13 @@ sint8 PICC_UnpackMessage(const uint8 *inBuf, uint32 inLen,
 
     /* Parameter check */
     if ((inBuf == NULL) || (header == NULL) || (payload == NULL) || (payloadLen == NULL)) {
-        HANDLE_ERROR(-1);  /* Unpack parameter error */
+        PICC_HANDLE_ERROR(-1);  /* Unpack parameter error */
         return -1;
     }
 
     /* Minimum length check */
     if (inLen < PICC_HEADER_SIZE) {
-        HANDLE_ERROR(-2);  /* Message length insufficient */
+        PICC_HANDLE_ERROR(-2);  /* Message length insufficient */
         return -2;
     }
 
@@ -206,7 +206,7 @@ sint8 PICC_UnpackMessage(const uint8 *inBuf, uint32 inLen,
 
     /* Check length consistency */
     if ((PICC_HEADER_SIZE + (uint32)len) > inLen) {
-        HANDLE_ERROR(-3);  /* Message length inconsistent */
+        PICC_HANDLE_ERROR(-3);  /* Message length inconsistent */
         return -3;
     }
 

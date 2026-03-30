@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 #include "picc_service.h"   /* PICC_SendEvent, PICC_EventCallback_t, PICC_MethodCallback_t */
-#include "picc_link.h"      /* PICC_LinkState_e, PICC_LinkStateCallback_t */
+#include "picc_link.h"      /* PICC_LinkState_e */
 
 /*==================================================================================================
  *                                         Error Codes
@@ -74,17 +74,15 @@ typedef enum {
  * performed automatically inside PICC_Init().
  *
  * Callback Design Principle:
- *   All three callback fields (linkStateCallback, methodHandler, eventHandler)
- *   are OPTIONAL. Passing NULL means the application uses polling mode for
- *   that particular feature. Passing a valid function pointer enables
- *   immediate callback mode IN ADDITION to polling (both work simultaneously).
+ *   Both callback fields (methodHandler and eventHandler) are OPTIONAL.
+ *   Passing NULL means the application uses polling mode for that feature.
+ *   Passing a valid function pointer enables immediate callback mode in
+ *   addition to polling.
  *
- * linkStateCallback:
- *   - NULL  : Application polls link state via PICC_GetLinkState(channelId).
- *             Suitable for periodic tasks (e.g., Pwsm 10ms cycle).
- *   - !NULL : Driver calls this function immediately when link state changes
- *             (connected/disconnected). Suitable for applications requiring
- *             instant reaction (e.g., DIAG module raising DTC on disconnect).
+ * Link state handling:
+ *   Link state callbacks are intentionally not part of the application
+ *   configuration. Applications query link state explicitly through the
+ *   public PICC_GetLinkState(channelId) API when needed.
  *
  * methodHandler:
  *   - NULL  : Received Method requests are stored in the internal mailbox.
@@ -113,7 +111,6 @@ typedef struct {
     uint8                    remoteId;          /**< Remote ID (peer's ProviderID or ConsumerID) */
     PICC_Role_e              role;              /**< PICC_ROLE_SERVER or PICC_ROLE_CLIENT */
     uint8                    channelId;         /**< IPCF channel ID (1 or 2) */
-    PICC_LinkStateCallback_t linkStateCallback; /**< Link state change callback (NULL = use PICC_GetLinkState polling) */
     PICC_MethodCallback_t    methodHandler;     /**< Method request callback (NULL = use PICC_GetMethodData polling) */
     PICC_EventCallback_t     eventHandler;      /**< Event notification callback (NULL = use PICC_GetEventData polling) */
 } PICC_AppConfig_t;
@@ -125,23 +122,29 @@ typedef struct {
 /**
  * @brief Register one application with the PICC driver
  *
- * Performs all internal registrations (Link, Method handler, Event handler,
- * Link state callback) in a single call. The application layer only needs
- * to call this function once during its own Xxx_Init().
+ * Performs all internal registrations (Link, Method handler, Event handler)
+ * in a single call. The application layer only needs to call this function
+ * once during its own Xxx_Init().
  *
  * This function is designed to be universally compatible across all application
  * modules. Different applications can independently choose polling mode
- * (callback = NULL) or immediate callback mode for each feature by setting
- * the corresponding fields in PICC_AppConfig_t.
+ * or immediate callback mode for Method/Event handling by setting the
+ * corresponding fields in PICC_AppConfig_t.
  *
  * Prerequisites:
  *   - PICC_PreOS_Init() must have been called first.
  *
  *
  * @par Callback Documentation:
- * When initializing PICC_Init(), you can pass callback functions in 'config'. The signatures 
- * and exact parameter meanings are documented below:
- *
+ * When initializing PICC_Init(), you can pass callback functions in 'config'. 
+ * 
+ * @warning ⚠️ ISR CONTEXT EXECUTION WARNING ⚠️
+ *          Both `methodHandler` and `eventHandler` run directly within the IPCF hardware 
+ *          RX Interrupt Service Routine (ISR) context.
+ *          Application implementations MUST adhere to the following strict rules:
+ *          1. **MAX EXECUTION TIME**: Must not exceed 50 microseconds.
+ *          2. **NO BLOCKING**: Absolutely NO blocking OS calls (e.g., vTaskDelay, blocking on Semaphores/Mutexes, infinite loops).
+ *          3. **PURPOSE**: Only use for instant hardware capture (e.g., timestamps) or rapid non-blocking state/variable updates.
  * @par eventHandler Signature:
  * `void My_EventHandler(uint8 providerId, uint8 eventId, const uint8 *data, uint16 len, uint8 *cbResult, uint16 *cbResultLen)`
  *  - @b providerId : [Input] The A-Core Server's Provider ID that broadcasted this event.
@@ -163,7 +166,8 @@ typedef struct {
  *  - @b cbResultLen: [Output] Indicates how many bytes of 'cbResult' the M-Core handler populated.
  *
  * @param[in] appIndex  Application index from PICC_AppIndex_e enum (e.g., PICC_APP_PWR).
- * @param[in] config    Pointer to application configuration (IDs, Role, Channel, and Callback functions).
+ * @param[in] config    Pointer to application configuration (IDs, role, channel,
+ *                      and optional Method/Event callbacks).
  *
  * @return PICC_E_OK        on success
  * @return PICC_E_PARAM     if config is NULL or appIndex is out of range
@@ -183,6 +187,13 @@ sint8 PICC_Init(PICC_AppIndex_e appIndex, const PICC_AppConfig_t *config);
  * The driver automatically uses the localId, remoteId, and channelId from the
  * application's PICC_Init() configuration.
  *
+ * @note IPCF Protocol Rule 3 constraints:
+ *       1. M-Core should generally use `PICC_EVENT_WITHOUT_ACK`.
+ *       2. If the application explicitly requires `PICC_EVENT_WITH_ACK`, M-Core will send
+ *          the notification requiring an ACK, but due to M-Core's real-time constraints,
+ *          the protocol layer will silently IGNORE the resulting EVENT_ACK from A-Core
+ *          without blocking or processing it.
+ *
  * @param[in] appIndex Application index (e.g., PICC_APP_PWR, PICC_APP_TIMESYNC).
  * @param[in] eventId  Event ID to send.
  * @param[in] data     Pointer to the event payload data.
@@ -201,6 +212,17 @@ sint8 PICC_SendEvent(PICC_AppIndex_e appIndex, uint8 eventId,
  * This function is used by the M-Core (acting as a Client) to send a request
  * to the A-Core (acting as a Server). The driver automatically uses the remoteId
  * and channelId from the application's PICC_Init() configuration.
+ *
+ * @note IPCF Protocol Rule 3 constraints:
+ *       Due to the real-time nature of M-Core hardware, this API does NOT block to
+ *       wait for A-Core's response. It completely operates asynchronously.
+ *       M-Core apps MUST capture the returned Session ID of this function, and
+ *       later use it in `PICC_GetResponseData()` to asynchronously poll and match 
+ *       the exact RESPONSE message returning from A-core.
+ *       Supported Method Types:
+ *         - PICC_METHOD_WITH_RESPONSE: Request requires business logic response.
+ *         - PICC_METHOD_NO_RETURN_WITH_ACK: Request requires protocol ACK only.
+ *         - PICC_METHOD_NO_RETURN_WITHOUT_ACK: Fire and forget request.
  *
  * @param[in] appIndex Application index (e.g., PICC_APP_OTA, PICC_APP_PWR).
  * @param[in] methodId Method ID to be invoked on the A-Core side.
@@ -268,10 +290,21 @@ sint8 PICC_GetMethodData(PICC_AppIndex_e appIndex, uint8 methodId,
  * @brief Retrieve a Method Response returned by A-Core to M-Core (M-Core is Client)
  *
  * After M-Core calls PICC_MethodRequest(), it uses this API in a periodic task to check 
- * if A-Core has replied. Once A-Core replies, M-Core reads the target returnCode and data.
+ * if A-Core has replied. The sessionId parameter is critical for matching the correct
+ * response when multiple async requests with the same methodId are outstanding.
+ *
+ * Session ID Matching Rules:
+ *   - Non-zero sessionId: Only returns a response whose sessionId matches exactly.
+ *     This is the RECOMMENDED usage for async Method calls, as the sessionId was
+ *     returned by PICC_MethodRequest() and uniquely identifies each request.
+ *   - Zero sessionId (0): Matches the first available response for this methodId
+ *     regardless of session. This provides backward compatibility but risks
+ *     returning the wrong response if multiple requests share the same methodId.
  *
  * @param[in]  appIndex    M-Core Application index (e.g., PICC_APP_PWR).
  * @param[in]  methodId    The Method ID mapping to the original request sent by M-Core.
+ * @param[in]  sessionId   Session ID returned by PICC_MethodRequest(). Use this to match
+ *                          the exact response. Pass 0 only if session matching is not needed.
  * @param[out] returnCode  Buffer to store the return code sent back by A-Core.
  * @param[out] data        Buffer to store the response payload data generated by A-Core.
  * @param[in]  maxLen      Maximum size of the 'data' buffer provided by M-Core.
@@ -280,11 +313,11 @@ sint8 PICC_GetMethodData(PICC_AppIndex_e appIndex, uint8 methodId,
  * @param[out] cbResultLen Returns the length of the callback result (pass NULL if not needed/registered).
  *
  * @return PICC_E_OK       = A-Core has responded and data is retrieved.
- *         PICC_E_NO_DATA  = A-Core has not responded yet.
+ *         PICC_E_NO_DATA  = A-Core has not responded yet (or sessionId mismatch).
  *         PICC_E_PARAM    = Invalid parameters provided.
  */
 sint8 PICC_GetResponseData(PICC_AppIndex_e appIndex, uint8 methodId,
-                           uint8 *returnCode,
+                           uint8 sessionId, uint8 *returnCode,
                            uint8 *data, uint16 maxLen, uint16 *actualLen,
                            uint8 *cbResult, uint16 *cbResultLen);
 
@@ -316,10 +349,17 @@ sint8 PICC_GetEventData(PICC_AppIndex_e appIndex, uint8 eventId,
  *==================================================================================================*/
 
 /**
- * @brief Get link connection state for specified channel
+ * @brief Get the current link state for a channel
  *
- * @param[in] channelId IPCF channel ID
- * @return Connection state @see PICC_LinkState_e
+ * Applications can use this polling API to check whether the underlying
+ * PICC link is disconnected, connecting, or connected before performing
+ * optional business logic. All PICC send APIs already validate link state
+ * internally, so calling this function is only required when the application
+ * wants to make its own state-based decisions.
+ *
+ * @param[in] channelId IPCF channel ID.
+ *
+ * @return Current link state for the specified channel.
  */
 PICC_LinkState_e PICC_GetLinkState(uint8 channelId);
 

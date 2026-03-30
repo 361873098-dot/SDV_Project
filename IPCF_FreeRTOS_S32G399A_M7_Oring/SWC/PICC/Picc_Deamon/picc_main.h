@@ -29,7 +29,7 @@ extern "C"{
 #define PICC_DIAG_RECORD_ENABLE         (1U)
 
 /** Error handling macro, auto passes file and line number (used by PICC module) */
-#define HANDLE_ERROR(err)       handle_error((err), __FILE__, __LINE__)
+#define PICC_HANDLE_ERROR(err)       PICC_handle_error((err), __FILE__, __LINE__)
 
 /*==================================================================================================
  *                                         Function Declarations
@@ -52,7 +52,7 @@ void PICC_PreOS_Init(void);
  *
  * @param[in] params  FreeRTOS task parameter (unused)
  */
-void App_Rx_Msg_10ms_Task(void *params);
+void PICC_Rx_Msg_10ms_Task(void *params);
 
 /**
  * @brief Error handling function
@@ -61,7 +61,7 @@ void App_Rx_Msg_10ms_Task(void *params);
  * @param[in] file  File where error occurred
  * @param[in] line  Line where error occurred
  */
-void handle_error(sint8 error, const char *file, int line);
+void PICC_handle_error(sint8 error, const char *file, int line);
 
 #if (PICC_DIAG_RECORD_ENABLE == 1U)
 /**

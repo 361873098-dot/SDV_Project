@@ -189,7 +189,7 @@ sint8 PICC_HeartbeatAddChannel(uint8 instanceId, uint8 channelId)
     }
     
     if (freeSlot == -1) {
-        HANDLE_ERROR(-3);  /* No free slot for heartbeat channel */
+        PICC_HANDLE_ERROR(-3);  /* No free slot for heartbeat channel */
         return -1;  /* No free slot */
     }
     
@@ -215,7 +215,7 @@ sint8 PICC_HeartbeatSendPing(uint8 instanceId, uint8 channelId)
 
     /* Send through Stack layer */
     ret = PICC_StackAddMessageToChannel(channelId, pingMsg, PICC_HEARTBEAT_MSG_SIZE);
-    /* Note: Don't HANDLE_ERROR here - Ping failures are normal when A-core is not ready */
+    /* Note: Don't PICC_HANDLE_ERROR here - Ping failures are normal when A-core is not ready */
     return ret;
 }
 
@@ -279,7 +279,7 @@ sint8 PICC_HeartbeatSendPong(uint8 instanceId, uint8 channelId)
          */
         (void)PICC_StackFlushChannel(channelId);
     } else {
-        HANDLE_ERROR(-5);  /* Failed to send heartbeat Pong */
+        PICC_HANDLE_ERROR(-5);  /* Failed to send heartbeat Pong */
     }
     return ret;
 }
@@ -294,7 +294,7 @@ sint8 PICC_HeartbeatHandlePing(uint8 instanceId, uint8 channelId)
     /* [FIX] Do NOT reset missCount here, only reply Pong */
     ret = PICC_HeartbeatSendPong(instanceId, channelId);
     if (ret != 0) {
-        HANDLE_ERROR(-6);  /* Failed to handle Ping (Pong send failed) */
+        PICC_HANDLE_ERROR(-6);  /* Failed to handle Ping (Pong send failed) */
     }
     return ret;
 }
