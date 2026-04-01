@@ -111,6 +111,7 @@ typedef struct {
     uint8                    remoteId;          /**< Remote ID (peer's ProviderID or ConsumerID) */
     PICC_Role_e              role;              /**< PICC_ROLE_SERVER or PICC_ROLE_CLIENT */
     uint8                    channelId;         /**< IPCF channel ID (1 or 2) */
+    uint16                   Client_linkReq_PeriodMs; /**< CLIENT connection request period (ms), 0=default 10ms. Ignored for SERVER. */
     PICC_MethodCallback_t    methodHandler;     /**< Method request callback (NULL = use PICC_GetMethodData polling) */
     PICC_EventCallback_t     eventHandler;      /**< Event notification callback (NULL = use PICC_GetEventData polling) */
 } PICC_AppConfig_t;
@@ -345,23 +346,34 @@ sint8 PICC_GetEventData(PICC_AppIndex_e appIndex, uint8 eventId,
                         uint8 *cbResult, uint16 *cbResultLen);
 
 /*==================================================================================================
- *                              Public API — Status Query (1 function)
+ *                              Public API — Status Query (2 functions)
  *==================================================================================================*/
 
 /**
- * @brief Get the current link state for a channel
+ * @brief Get the physical channel health state (heartbeat-based)
  *
- * Applications can use this polling API to check whether the underlying
- * PICC link is disconnected, connecting, or connected before performing
- * optional business logic. All PICC send APIs already validate link state
- * internally, so calling this function is only required when the application
- * wants to make its own state-based decisions.
+ * Returns CONNECTED if the heartbeat on the specified IPCF channel is alive,
+ * DISCONNECTED if the heartbeat has timed out. This checks the physical
+ * transport layer, NOT the application-level connection handshake.
+ *
+ * For per-app connection state, use PICC_GetAppLinkState() instead.
  *
  * @param[in] channelId IPCF channel ID.
- *
- * @return Current link state for the specified channel.
+ * @return Physical channel health state.
  */
 PICC_LinkState_e PICC_GetLinkState(uint8 channelId);
+
+/**
+ * @brief Get the application-level link connection state (per-app)
+ *
+ * Each application (ProviderID/ConsumerID pair) independently performs
+ * connection handshake with the remote peer. This API returns the
+ * connection state for the specified appIndex.
+ *
+ * @param[in] appIndex Application index (e.g., PICC_APP_PWR).
+ * @return Application-level link state (DISCONNECTED, CONNECTING, or CONNECTED).
+ */
+PICC_LinkState_e PICC_GetAppLinkState(PICC_AppIndex_e appIndex);
 
 #if defined(__cplusplus)
 }

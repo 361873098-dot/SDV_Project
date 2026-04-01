@@ -391,6 +391,9 @@ void PICC_InfraInit(void)
 
     /* 4. Initialize app contexts and mailboxes */
     PICC_MailboxInit();
+
+    /* 5. One-time initialization of link management layer (per-app contexts) */
+    PICC_LinkLayerInit();
 }
 
 /**

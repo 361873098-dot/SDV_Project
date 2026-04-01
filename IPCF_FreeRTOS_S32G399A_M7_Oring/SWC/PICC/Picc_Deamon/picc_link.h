@@ -24,11 +24,14 @@ extern "C" {
  *                                         Macro Definitions
  *==================================================================================================*/
 
-/** Connection request period (ms) */
+/** Default connection request period (ms) for CLIENT apps */
 #define PICC_LINK_REQUEST_PERIOD_MS     (10U)
 
-/** Maximum supported channels */
+/** Maximum supported physical channels */
 #define PICC_MAX_CHANNELS               (2U)
+
+/** Maximum supported link app contexts (per-app, matches PICC_APP_MAX) */
+#define PICC_MAX_LINK_APPS              (10U)
 
 /*==================================================================================================
  *                                         Enum Types
@@ -56,6 +59,7 @@ typedef struct {
     PICC_Role_e  role;          /**< Role */
     uint8        instanceId;    /**< IPCF instance ID */
     uint8        channelId;     /**< IPCF channel ID */
+    uint16       Client_linkReq_PeriodMs; /**< CLIENT connection request period (ms), 0=default 10ms */
     boolean      isUsed;        /**< Is slot in use */
 } PICC_LinkConfig_t;
 
@@ -66,6 +70,8 @@ typedef struct {
     PICC_LinkConfig_t config;           /**< Link configuration */
     volatile PICC_LinkState_e state;    /**< Current state (volatile) */
     boolean           isInitialized;    /**< Whether initialized */
+    uint16            periodCounter;    /**< Per-app period counter for CLIENT request timing */
+    uint8             backoffCounter;   /**< Per-app send backoff counter */
 } PICC_LinkContext_t;
 
 /*==================================================================================================
@@ -73,33 +79,29 @@ typedef struct {
  *==================================================================================================*/
 
 /**
- * @brief Initialize link management module
+ * @brief One-time initialization of the link management layer
  * 
- * @param[in] config Link configuration
- * @return 0 on success, non-zero on failure
+ * Clears all link app contexts. Must be called once during
+ * PICC_InfraInit() before any PICC_Init()/PICC_LinkRegisterApp() calls.
  */
-sint8 PICC_LinkInit(const PICC_LinkConfig_t *config);
+void PICC_LinkLayerInit(void);
 
 /**
- * @brief Add additional communication channel
+ * @brief Register a single application link context
  * 
- * @param[in] instanceId Instance ID
- * @param[in] channelId  Channel ID
- * @return 0 on success, non-zero on failure
+ * Finds a free slot and registers the app without affecting other contexts.
+ * CLIENT role: auto enters CONNECTING state.
+ * SERVER role: stays in DISCONNECTED state.
+ * 
+ * @param[in] config Link configuration for this app
+ * @return 0 on success, -1 on failure (no free slot or bad param)
  */
-sint8 PICC_LinkAddChannel(uint8 instanceId, uint8 channelId);
+sint8 PICC_LinkRegisterApp(const PICC_LinkConfig_t *config);
 
 /**
  * @brief Deinitialize link management module
  */
 void PICC_LinkDeinit(void);
-
-/**
- * @brief Send connection request (Client role)
- * 
- * @return 0 on success, non-zero on failure
- */
-sint8 PICC_LinkSendRequest(void);
 
 /**
  * @brief Handle connection response (Client role)
@@ -130,11 +132,13 @@ sint8 PICC_LinkHandleRequest(const PICC_MsgHeader_t *header,
                              uint8 instanceId, uint8 channelId);
 
 /**
- * @brief Send disconnect notification
+ * @brief Get application-level link state by ID pair
  * 
- * @return 0 on success, non-zero on failure
+ * @param[in] localId  Local ID
+ * @param[in] remoteId Remote ID
+ * @return Connection state for the specified app pair
  */
-sint8 PICC_LinkSendDisconnect(void);
+PICC_LinkState_e PICC_LinkGetStateByIds(uint8 localId, uint8 remoteId);
 
 /**
  * @brief Handle disconnect notification

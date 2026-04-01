@@ -2,8 +2,11 @@
  * @file picc_link.c
  * @brief M-Core Inter-Core Communication Link Management Layer - Implementation
  *
- * Implements connection request/response and disconnect notification.
- * Note: Heartbeat (Ping/Pong) is now in picc_heartbeat.c
+ * Implements per-app connection request/response and disconnect notification.
+ * Each registered application (ProviderID/ConsumerID pair) independently
+ * maintains its own connection state, handshake, and reconnection logic.
+ *
+ * Note: Heartbeat (Ping/Pong) is in picc_heartbeat.c
  *
  * Copyright 2024 NXP
  * All Rights Reserved.
@@ -19,19 +22,12 @@ extern "C" {
 #include "ipc-shm.h"
 #include "ipcf_Ip_Cfg_Defines.h" /* For IPCF_INSTANCE0 */
 #include "picc_stack.h"
+#include "picc_heartbeat.h" /* For PICC_HeartbeatGetMissCount */
 #include "task.h" /* For taskENTER_CRITICAL, taskEXIT_CRITICAL */
 
-/* NOTE: timers.h removed - no longer using FreeRTOS timers */
-
 /*==================================================================================================
- *                                         Private Variables
+ *                                         Macro Definitions
  *==================================================================================================*/
-
-/** Link context array */
-static PICC_LinkContext_t g_linkContexts[PICC_MAX_CHANNELS];
-
-/** Send flow control: backoff counter (incremented when buffer full, used to reduce send frequency) */
-static uint8 g_sendBackoffCounter = 0U;
 
 /** Send flow control: maximum backoff value (100 * 10ms = 1000ms) */
 #define PICC_SEND_BACKOFF_MAX       (100U)
@@ -40,24 +36,34 @@ static uint8 g_sendBackoffCounter = 0U;
 #define PICC_SEND_BACKOFF_INCREMENT (10U)
 
 /*==================================================================================================
+ *                                         Private Variables
+ *==================================================================================================*/
+
+/** Link context array — one slot per registered application */
+static PICC_LinkContext_t g_linkContexts[PICC_MAX_LINK_APPS];
+
+/*==================================================================================================
  *                                         Private Function Declarations
  *==================================================================================================*/
-static PICC_LinkContext_t* PICC_GetLinkContext(uint8 instanceId, uint8 channelId);
+static PICC_LinkContext_t* PICC_GetLinkContextByIds(uint8 localId, uint8 remoteId);
+static PICC_LinkContext_t* PICC_GetLinkContextByHeader(uint8 providerId, uint8 consumerId, uint8 channelId);
 
 /*==================================================================================================
  *                                         Private Functions
  *==================================================================================================*/
 
 /**
- * @brief Get context by Channel ID
+ * @brief Get link context by local/remote ID pair
+ *
+ * Used for internal state queries (e.g., PICC_LinkGetStateByIds).
  */
-static PICC_LinkContext_t* PICC_GetLinkContext(uint8 instanceId, uint8 channelId)
+static PICC_LinkContext_t* PICC_GetLinkContextByIds(uint8 localId, uint8 remoteId)
 {
     uint32 i;
-    for (i = 0U; i < PICC_MAX_CHANNELS; i++) {
-        if (g_linkContexts[i].config.isUsed != FALSE && 
-            g_linkContexts[i].config.instanceId == instanceId &&
-            g_linkContexts[i].config.channelId == channelId) {
+    for (i = 0U; i < PICC_MAX_LINK_APPS; i++) {
+        if ((g_linkContexts[i].config.isUsed != FALSE) &&
+            (g_linkContexts[i].config.localId == localId) &&
+            (g_linkContexts[i].config.remoteId == remoteId)) {
             return &g_linkContexts[i];
         }
     }
@@ -65,8 +71,52 @@ static PICC_LinkContext_t* PICC_GetLinkContext(uint8 instanceId, uint8 channelId
 }
 
 /**
+ * @brief Get link context by protocol header ProviderID/ConsumerID + channelId
+ *
+ * Used when processing received messages. The mapping between header fields
+ * and local/remote IDs depends on the app's role:
+ *   - SERVER: localId = ProviderID, remoteId = ConsumerID
+ *   - CLIENT: localId = ConsumerID, remoteId = ProviderID
+ *
+ * @param[in] providerId ProviderID from received message header
+ * @param[in] consumerId ConsumerID from received message header
+ * @param[in] channelId  IPCF channel the message was received on
+ * @return Matching context, or NULL if not found
+ */
+static PICC_LinkContext_t* PICC_GetLinkContextByHeader(uint8 providerId, uint8 consumerId, uint8 channelId)
+{
+    uint32 i;
+    PICC_LinkContext_t *ctx;
+
+    for (i = 0U; i < PICC_MAX_LINK_APPS; i++) {
+        ctx = &g_linkContexts[i];
+        if (ctx->config.isUsed == FALSE) {
+            continue;
+        }
+        if (ctx->config.channelId != channelId) {
+            continue;
+        }
+
+        if (ctx->config.role == PICC_ROLE_SERVER) {
+            /* SERVER: localId = ProviderID, remoteId = ConsumerID */
+            if ((ctx->config.localId == providerId) &&
+                (ctx->config.remoteId == consumerId)) {
+                return ctx;
+            }
+        } else {
+            /* CLIENT: localId = ConsumerID, remoteId = ProviderID */
+            if ((ctx->config.localId == consumerId) &&
+                (ctx->config.remoteId == providerId)) {
+                return ctx;
+            }
+        }
+    }
+    return NULL;
+}
+
+/**
  * @brief Send link related message (unified through Stack stacking)
- * 
+ *
  * @note [R7] All sent messages go through Stack, ensuring CRC+Counter protection
  */
 static sint8 PICC_LinkSendMessage(uint8 providerId, uint8 consumerId,
@@ -118,11 +168,10 @@ static sint8 PICC_LinkSendMessage(uint8 providerId, uint8 consumerId,
 }
 
 /**
- * @brief Update connection state
+ * @brief Update connection state (critical section protected)
  */
 static void PICC_LinkSetState(PICC_LinkContext_t *ctx, PICC_LinkState_e newState)
 {
-    /* [FIX] Use critical section to atomically update state */
     taskENTER_CRITICAL();
     ctx->state = newState;
     taskEXIT_CRITICAL();
@@ -134,154 +183,166 @@ static void PICC_LinkSetState(PICC_LinkContext_t *ctx, PICC_LinkState_e newState
 
 /**
  * @brief Link process - called from PICC periodic task (10ms)
- * 
- * Handles connection requests (10ms)
- * Replaces the timer-based approach.
+ *
+ * Iterates all registered app link contexts.
+ * For each CLIENT app in CONNECTING state, sends connection request
+ * at the app's configured period (Client_linkReq_PeriodMs).
+ *
+ * SERVER apps do nothing here — they are purely passive.
  */
 void PICC_LinkProcess(void)
 {
     uint32 i;
     PICC_LinkContext_t *ctx;
 
-    /* Iterate through all active channels */
-    for (i = 0U; i < PICC_MAX_CHANNELS; i++) {
+    for (i = 0U; i < PICC_MAX_LINK_APPS; i++) {
         ctx = &g_linkContexts[i];
-        
-        if (ctx->config.isUsed == FALSE || ctx->isInitialized == FALSE) {
+
+        if ((ctx->config.isUsed == FALSE) || (ctx->isInitialized == FALSE)) {
             continue;
         }
 
-        /* Handle connection requests (Client role only and in CONNECTING state) */
-        if ((ctx->config.role == PICC_ROLE_CLIENT) && 
+        /* Only CLIENT role in CONNECTING state sends connection requests */
+        if ((ctx->config.role == PICC_ROLE_CLIENT) &&
             (ctx->state == PICC_LINK_STATE_CONNECTING)) {
-            
-            /* [Flow control] If backoff count exists, skip this send */
-            if (g_sendBackoffCounter > 0U) {
-                g_sendBackoffCounter--;
+
+            /* Per-app period timing */
+            uint16 periodTicks;
+            sint8 sendResult;
+
+            ctx->periodCounter++;
+
+            /* Calculate period in 10ms ticks */
+            if (ctx->config.Client_linkReq_PeriodMs == 0U) {
+                periodTicks = PICC_LINK_REQUEST_PERIOD_MS / 10U;
             } else {
-                /* Send connection request */
-                sint8 sendResult = PICC_LinkSendMessage(ctx->config.remoteId,
-                                                        ctx->config.localId,
-                                                        PICC_LINK_CONNECT,
-                                                        (uint8)PICC_RET_NOT_OK,
-                                                        ctx->config.instanceId,
-                                                        ctx->config.channelId);
-                
-                /* [Flow control - Hybrid Exponential Backoff]
-                 * Doubles backoff on each failure, capped at maximum.
-                 * Sequence: 10→20→40→80→100 (100ms→200ms→400ms→800ms→1000ms)
-                 * Balances quick initial retries with longer waits for persistent failures.
-                 */
-                if (sendResult != 0) {
-                    if (g_sendBackoffCounter == 0U) {
-                        /* First failure - start with base increment */
-                        g_sendBackoffCounter = PICC_SEND_BACKOFF_INCREMENT;
-                    } else {
-                        /* Subsequent failures - double the backoff */
-                        g_sendBackoffCounter = g_sendBackoffCounter * 2U;
-                        
-                        /* Cap at maximum to prevent overflow */
-                        if (g_sendBackoffCounter > PICC_SEND_BACKOFF_MAX) {
-                            g_sendBackoffCounter = PICC_SEND_BACKOFF_MAX;
-                        }
-                    }
+                periodTicks = ctx->config.Client_linkReq_PeriodMs / 10U;
+            }
+            if (periodTicks == 0U) {
+                periodTicks = 1U; /* Minimum 10ms */
+            }
+
+            if (ctx->periodCounter >= periodTicks) {
+                ctx->periodCounter = 0U;
+
+                /* [Flow control] If backoff count exists, skip this send */
+                if (ctx->backoffCounter > 0U) {
+                    ctx->backoffCounter--;
                 } else {
-                    /* Send succeeded - reset backoff counter for clean slate */
-                    g_sendBackoffCounter = 0U;
+                    /* Send connection request:
+                     * ProviderID = remoteId (A-Core Server's ID)
+                     * ConsumerID = localId  (M-Core Client's own ID)
+                     */
+                    sendResult = PICC_LinkSendMessage(
+                        ctx->config.remoteId,   /* ProviderID */
+                        ctx->config.localId,    /* ConsumerID */
+                        PICC_LINK_CONNECT,
+                        (uint8)PICC_RET_NOT_OK, /* ReturnCode=0x01 request */
+                        ctx->config.instanceId,
+                        ctx->config.channelId);
+
+                    /* [Flow control - Per-app Exponential Backoff]
+                     * Doubles backoff on each failure, capped at maximum.
+                     * Sequence: 10→20→40→80→100 (100ms→200ms→400ms→800ms→1000ms)
+                     */
+                    if (sendResult != 0) {
+                        if (ctx->backoffCounter == 0U) {
+                            ctx->backoffCounter = PICC_SEND_BACKOFF_INCREMENT;
+                        } else {
+                            ctx->backoffCounter = ctx->backoffCounter * 2U;
+                            if (ctx->backoffCounter > PICC_SEND_BACKOFF_MAX) {
+                                ctx->backoffCounter = PICC_SEND_BACKOFF_MAX;
+                            }
+                        }
+                    } else {
+                        ctx->backoffCounter = 0U;
+                    }
                 }
             }
         }
+        /* SERVER role: do nothing, purely passive */
     }
 }
 
 /**
- * @brief Initialize link management layer
+ * @brief One-time initialization of the link management layer
+ *
+ * Clears all link app contexts. Must be called once during
+ * PICC_InfraInit() before any PICC_Init()/PICC_LinkRegisterApp() calls.
  */
-sint8 PICC_LinkInit(const PICC_LinkConfig_t *config)
+void PICC_LinkLayerInit(void)
 {
     uint32 i;
 
-    if (config == NULL) {
-        PICC_HANDLE_ERROR(-1);  /* Link config parameter is NULL */
-        return -1;
-    }
-
-    /* Clear all contexts */
-    for (i = 0U; i < PICC_MAX_CHANNELS; i++) {
+    for (i = 0U; i < PICC_MAX_LINK_APPS; i++) {
         g_linkContexts[i].config.isUsed = FALSE;
         g_linkContexts[i].isInitialized = FALSE;
         g_linkContexts[i].state = PICC_LINK_STATE_DISCONNECTED;
+        g_linkContexts[i].periodCounter = 0U;
+        g_linkContexts[i].backoffCounter = 0U;
     }
-
-    /* Initialize first channel */
-    g_linkContexts[0].config = *config;
-    g_linkContexts[0].config.isUsed = TRUE;
-    
-    /* [R5] Role auto-start mechanism:
-     * - CLIENT: Auto enters CONNECTING state, timer will periodically send connection requests
-     * - SERVER: Stays in DISCONNECTED state, passively listens for Client connection requests
-     */
-    if (config->role == PICC_ROLE_CLIENT) {
-        g_linkContexts[0].state = PICC_LINK_STATE_CONNECTING;
-    } else {
-        g_linkContexts[0].state = PICC_LINK_STATE_DISCONNECTED;
-    }
-    
-    g_linkContexts[0].isInitialized = TRUE;
-
-    /* NOTE: Timer removed - PICC_LinkProcess() is called from PICC_PeriodicTask */
-    return 0;
 }
 
 /**
- * @brief Add additional communication channel
+ * @brief Register a single application link context
+ *
+ * Finds a free slot and registers one app's link context.
+ * Does NOT clear or affect any other registered apps.
+ *
+ * [R5] Role auto-start mechanism:
+ *   - CLIENT: Auto enters CONNECTING state, PICC_LinkProcess will
+ *             periodically send connection requests
+ *   - SERVER: Stays in DISCONNECTED state, passively listens for
+ *             Client connection requests from A-Core
+ *
+ * @param[in] config Link configuration for this app
+ * @return 0 on success, -1 on failure (no free slot or bad param)
  */
-sint8 PICC_LinkAddChannel(uint8 instanceId, uint8 channelId)
+sint8 PICC_LinkRegisterApp(const PICC_LinkConfig_t *config)
 {
     uint32 i;
     sint8 slot = -1;
-    
-    /* Check if already exists */
-    for (i = 0U; i < PICC_MAX_CHANNELS; i++) {
-        if (g_linkContexts[i].config.isUsed != FALSE && 
-            g_linkContexts[i].config.instanceId == instanceId &&
-            g_linkContexts[i].config.channelId == channelId) {
-            return 0; /* Already exists, return success */
+
+    if (config == NULL) {
+        PICC_HANDLE_ERROR(-1);
+        return -1;
+    }
+
+    /* Check if already registered (same localId + remoteId) */
+    for (i = 0U; i < PICC_MAX_LINK_APPS; i++) {
+        if ((g_linkContexts[i].config.isUsed != FALSE) &&
+            (g_linkContexts[i].config.localId == config->localId) &&
+            (g_linkContexts[i].config.remoteId == config->remoteId)) {
+            /* Already registered, update config and return success */
+            g_linkContexts[i].config = *config;
+            g_linkContexts[i].config.isUsed = TRUE;
+            return 0;
         }
         /* Record first free slot */
-        if (slot == -1 && g_linkContexts[i].config.isUsed == FALSE) {
+        if ((slot == -1) && (g_linkContexts[i].config.isUsed == FALSE)) {
             slot = (sint8)i;
         }
     }
 
     if (slot == -1) {
-        PICC_HANDLE_ERROR(-4);  /* No free slot for link channel */
-        return -1; /* No free slot */
+        PICC_HANDLE_ERROR(-4);  /* No free slot for link app */
+        return -1;
     }
 
-    /* Reuse first channel's config, only modify channel/instance */
-    /* Assume at least one channel is initialized (LinkInit called) */
-    if (g_linkContexts[0].isInitialized == FALSE) {
-        PICC_HANDLE_ERROR(-5);  /* Primary link channel not initialized */
-        return -2;
-    }
-    
-    g_linkContexts[slot].config = g_linkContexts[0].config;
-    g_linkContexts[slot].config.instanceId = instanceId;
-    g_linkContexts[slot].config.channelId = channelId;
+    /* Register this app's link context */
+    g_linkContexts[slot].config = *config;
     g_linkContexts[slot].config.isUsed = TRUE;
-    
-    g_linkContexts[slot].state = PICC_LINK_STATE_DISCONNECTED;
+    g_linkContexts[slot].periodCounter = 0U;
+    g_linkContexts[slot].backoffCounter = 0U;
+
+    /* [R5] Role auto-start mechanism */
+    if (config->role == PICC_ROLE_CLIENT) {
+        g_linkContexts[slot].state = PICC_LINK_STATE_CONNECTING;
+    } else {
+        g_linkContexts[slot].state = PICC_LINK_STATE_DISCONNECTED;
+    }
+
     g_linkContexts[slot].isInitialized = TRUE;
-    
-    /* [FIX] Additional channels do NOT participate in Link management.
-     * Only the primary channel (initialized via PICC_LinkInit) sends Link requests.
-     * Additional channels are for data transfer only and share the link state 
-     * with the primary channel.
-     * 
-     * Do NOT set state to CONNECTING here - this prevents Link requests 
-     * from being sent on this channel.
-     */
 
     return 0;
 }
@@ -292,56 +353,28 @@ sint8 PICC_LinkAddChannel(uint8 instanceId, uint8 channelId)
 void PICC_LinkDeinit(void)
 {
     uint32 i;
-    
-    /* NOTE: Timer removed - no timer cleanup needed */
-    for (i = 0U; i < PICC_MAX_CHANNELS; i++) {
+
+    for (i = 0U; i < PICC_MAX_LINK_APPS; i++) {
         g_linkContexts[i].isInitialized = FALSE;
         g_linkContexts[i].config.isUsed = FALSE;
         g_linkContexts[i].state = PICC_LINK_STATE_DISCONNECTED;
+        g_linkContexts[i].periodCounter = 0U;
+        g_linkContexts[i].backoffCounter = 0U;
     }
-    
-}
-
-/**
- * @brief Send connection request (Client role)
- */
-sint8 PICC_LinkSendRequest(void)
-{
-    uint32 i;
-    sint8 ret = 0;
-
-    /* Iterate through all Client role channels to initiate connection */
-    for (i = 0U; i < PICC_MAX_CHANNELS; i++) {
-        if (g_linkContexts[i].config.isUsed != FALSE && 
-            g_linkContexts[i].config.role == PICC_ROLE_CLIENT) {
-            
-            PICC_LinkSetState(&g_linkContexts[i], PICC_LINK_STATE_CONNECTING);
-            
-            if (PICC_LinkSendMessage(g_linkContexts[i].config.remoteId,
-                                     g_linkContexts[i].config.localId,
-                                     PICC_LINK_CONNECT,
-                                     (uint8)PICC_RET_NOT_OK,
-                                     g_linkContexts[i].config.instanceId,
-                                     g_linkContexts[i].config.channelId) != 0) {
-                ret = -1;
-            }
-        }
-    }
-    return ret;
 }
 
 /**
  * @brief Handle connection response (Client role)
- * 
- * This function is called when the M-Core is acting as a CLIENT and receives
- * a connection response from the remote SERVER (A-Core).
- * 
+ *
+ * Called when M-Core is acting as CLIENT and receives a connection
+ * response from A-Core SERVER.
+ *
  * Message Flow:
  *   1. CLIENT (M-Core) sends LINK_CONNECT request with ReturnCode=0x01
  *   2. SERVER (A-Core) receives request, replies with ReturnCode=0x00 (agree)
  *   3. CLIENT receives response -> this function is called
  *   4. CLIENT updates state to CONNECTED if ReturnCode=0x00
- * 
+ *
  * @note This function does NOT send any message, it only processes the
  *       incoming response and updates the local connection state.
  */
@@ -353,28 +386,24 @@ sint8 PICC_LinkHandleResponse(const PICC_MsgHeader_t *header,
     PICC_LinkContext_t *ctx;
 
     (void)len;
+    (void)instanceId;
 
     if ((header == NULL) || (payload == NULL)) {
-        PICC_HANDLE_ERROR(-6);  /* Link handle response parameter NULL */
+        PICC_HANDLE_ERROR(-6);
         return -1;
     }
-    
+
     linkPayload = (const PICC_LinkPayload_t *)payload;
 
-    /* Find exact matching context */
-    ctx = PICC_GetLinkContext(instanceId, channelId);
-    if (ctx != NULL) {
-        if (ctx->config.role == PICC_ROLE_CLIENT &&
-            ctx->config.remoteId == header->providerId &&
-            ctx->config.localId == header->consumerId) {
-            
-            /* Check if connection response */
-            if (linkPayload->subType == (uint8)PICC_LINK_CONNECT) {
-                if (header->returnCode == (uint8)PICC_RET_OK) {
-                    PICC_LinkSetState(ctx, PICC_LINK_STATE_CONNECTED);
-                } else {
-                    PICC_LinkSetState(ctx, PICC_LINK_STATE_DISCONNECTED);
-                }
+    /* Find matching app context by header IDs */
+    ctx = PICC_GetLinkContextByHeader(header->providerId, header->consumerId, channelId);
+    if ((ctx != NULL) && (ctx->config.role == PICC_ROLE_CLIENT)) {
+        /* Check if this is a connection response */
+        if (linkPayload->subType == (uint8)PICC_LINK_CONNECT) {
+            if (header->returnCode == (uint8)PICC_RET_OK) {
+                PICC_LinkSetState(ctx, PICC_LINK_STATE_CONNECTED);
+            } else {
+                PICC_LinkSetState(ctx, PICC_LINK_STATE_DISCONNECTED);
             }
         }
     }
@@ -384,20 +413,16 @@ sint8 PICC_LinkHandleResponse(const PICC_MsgHeader_t *header,
 
 /**
  * @brief Handle incoming connection request (Server role)
- * 
- * This function is called when the M-Core is acting as a SERVER and receives
- * a connection request from the remote CLIENT (A-Core).
- * 
+ *
+ * Called when M-Core is acting as SERVER and receives a connection
+ * request from A-Core CLIENT.
+ *
  * Message Flow:
  *   1. CLIENT (A-Core) sends LINK_CONNECT request with ReturnCode=0x01
  *   2. SERVER (M-Core) receives request -> this function is called
  *   3. SERVER sends LINK_CONNECT response with ReturnCode=0x00 (agree)
  *   4. SERVER updates state to CONNECTED
- * 
- * @note The function name "HandleRequest" means "process the incoming request",
- *       NOT "send a request". The SERVER never initiates connection requests;
- *       it only responds to requests from CLIENTs.
- * 
+ *
  * @note Per [R5]: Server stays in DISCONNECTED state after startup, passively
  *       listening for Client connection requests.
  */
@@ -410,25 +435,24 @@ sint8 PICC_LinkHandleRequest(const PICC_MsgHeader_t *header,
     sint8 ret;
 
     (void)len;
+    (void)instanceId;
 
     if ((header == NULL) || (payload == NULL)) {
-        PICC_HANDLE_ERROR(-7);  /* Link handle request parameter NULL */
+        PICC_HANDLE_ERROR(-7);
         return -1;
     }
 
     linkPayload = (const PICC_LinkPayload_t *)payload;
 
     if (linkPayload->subType == (uint8)PICC_LINK_CONNECT) {
-        
-        ctx = PICC_GetLinkContext(instanceId, channelId);
-        /* Server receives Request: header->consumerId is Client */
-        if (ctx != NULL && ctx->config.role == PICC_ROLE_SERVER &&
-            ctx->config.localId == header->providerId &&
-            ctx->config.remoteId == header->consumerId) {
-            
+
+        /* Find matching app context by header IDs */
+        ctx = PICC_GetLinkContextByHeader(header->providerId, header->consumerId, channelId);
+        if ((ctx != NULL) && (ctx->config.role == PICC_ROLE_SERVER)) {
+
             /* Send connection response - agree to connect */
-            ret = PICC_LinkSendMessage(ctx->config.localId,  /* ProviderID */
-                                       header->consumerId,   /* ConsumerID */
+            ret = PICC_LinkSendMessage(ctx->config.localId,  /* ProviderID = Server's localId */
+                                       header->consumerId,    /* ConsumerID */
                                        PICC_LINK_CONNECT,
                                        (uint8)PICC_RET_OK,
                                        ctx->config.instanceId,
@@ -445,44 +469,11 @@ sint8 PICC_LinkHandleRequest(const PICC_MsgHeader_t *header,
 }
 
 /**
- * @brief Send disconnect notification
- * 
- * @note M-Core typically does not actively disconnect. Per [R5], only A-Core
- *       sends disconnect notifications when its APP exits.
- */
-sint8 PICC_LinkSendDisconnect(void)
-{
-    sint8 ret = 0;
-    uint32 i;
-    PICC_LinkContext_t *ctx;
-    sint8 sendRet;
-
-    for (i = 0U; i < PICC_MAX_CHANNELS; i++) {
-        ctx = &g_linkContexts[i];
-        if (ctx->config.isUsed) {
-            
-            uint8 pId = (ctx->config.role == PICC_ROLE_CLIENT) ? ctx->config.remoteId : ctx->config.localId;
-            uint8 cId = (ctx->config.role == PICC_ROLE_CLIENT) ? ctx->config.localId : ctx->config.remoteId;
-            
-            sendRet = PICC_LinkSendMessage(pId, cId, PICC_LINK_DISCONNECT, (uint8)PICC_RET_NOT_OK, 
-                                     ctx->config.instanceId, ctx->config.channelId);
-            if (sendRet == 0) {
-                PICC_LinkSetState(ctx, PICC_LINK_STATE_DISCONNECTED);
-            } else {
-                PICC_HANDLE_ERROR(-9);  /* Failed to send disconnect */
-                ret = -1;
-            }
-        }
-    }
-    return ret;
-}
-
-/**
  * @brief Handle incoming disconnect notification or reconnect request
- * 
- * This function is called when M-Core receives a disconnect/reconnect message
- * from A-Core, regardless of whether M-Core is CLIENT or SERVER.
- * 
+ *
+ * Called when M-Core receives a disconnect/reconnect message from A-Core,
+ * regardless of whether M-Core is CLIENT or SERVER.
+ *
  * Disconnect Flow (A-Core APP exits):
  *   1. A-Core PICC Daemon detects APP exit
  *   2. A-Core sends LINK_DISCONNECT with ReturnCode=0x01
@@ -490,15 +481,16 @@ sint8 PICC_LinkSendDisconnect(void)
  *   4. M-Core replies LINK_DISCONNECT with ReturnCode=0x00 (confirm)
  *   5. If M-Core is CLIENT: auto enters CONNECTING state to reconnect
  *      If M-Core is SERVER: stays in DISCONNECTED, waits for CLIENT
- * 
+ *
  * Reconnect Flow (A-Core Daemon restarts, A-Core is SERVER):
  *   1. A-Core Daemon crashes and restarts
  *   2. A-Core SERVER sends LINK_RECONNECT notification
  *   3. M-Core CLIENT receives -> this function is called
  *   4. M-Core CLIENT re-enters CONNECTING state to send new requests
- * 
+ *
  * @note Per [R5]: CLIENT will keep retrying connection requests, so resources
  *       can be safely released on disconnect.
+ * @note M-Core never actively sends disconnect notifications per protocol.
  */
 sint8 PICC_LinkHandleDisconnect(const PICC_MsgHeader_t *header,
                                 const uint8 *payload, uint16 len,
@@ -508,99 +500,48 @@ sint8 PICC_LinkHandleDisconnect(const PICC_MsgHeader_t *header,
     PICC_LinkContext_t *ctx;
 
     (void)len;
+    (void)instanceId;
 
     if (payload == NULL) {
-        PICC_HANDLE_ERROR(-10);  /* Link handle disconnect payload NULL */
+        PICC_HANDLE_ERROR(-10);
         return -1;
     }
     linkPayload = (const PICC_LinkPayload_t *)payload;
 
-    ctx = PICC_GetLinkContext(instanceId, channelId);
-    if (ctx != NULL) {
-        /* [FIX] Validate ProviderID/ConsumerID match before processing disconnect.
-         * Without this check, a disconnect from another app (e.g. DiagMgmt 0x51/0x5B)
-         * on the same IPCF channel would incorrectly disconnect this link context
-         * (e.g. Power Management 0x01/0x06), breaking the shutdown sequence.
-         *
-         * Protocol spec: ProviderID = Server ID, ConsumerID = Client ID (stable per pairing)
-         */
-        boolean idMatch = FALSE;
-        if (ctx->config.role == PICC_ROLE_SERVER) {
-            /* SERVER: localId = ProviderID, remoteId = ConsumerID */
-            idMatch = (header->providerId == ctx->config.localId &&
-                       header->consumerId == ctx->config.remoteId) ? TRUE : FALSE;
-        } else {
-            /* CLIENT: localId = ConsumerID, remoteId = ProviderID */
-            idMatch = (header->providerId == ctx->config.remoteId &&
-                       header->consumerId == ctx->config.localId) ? TRUE : FALSE;
+    /* Find matching app context by header IDs (idMatch is done inside) */
+    ctx = PICC_GetLinkContextByHeader(header->providerId, header->consumerId, channelId);
+    if (ctx == NULL) {
+        /* Not for any registered app, ignore silently */
+        return 0;
+    }
+
+    if (linkPayload->subType == (uint8)PICC_LINK_DISCONNECT) {
+
+        /* [R5] Received disconnect notification (ReturnCode usually 0x01) */
+        /* 1. Set state to disconnected */
+        PICC_LinkSetState(ctx, PICC_LINK_STATE_DISCONNECTED);
+
+        /* 2. Reply disconnect confirmation (ReturnCode=0x00) */
+        /* Protocol: ProviderID/ConsumerID stay the same for the pairing */
+        (void)PICC_LinkSendMessage(header->providerId,  /* Keep Provider ID */
+                                   header->consumerId,  /* Keep Consumer ID */
+                                   PICC_LINK_DISCONNECT,
+                                   (uint8)PICC_RET_OK,  /* Confirm: 0x00 */
+                                   IPCF_INSTANCE0, channelId);
+
+        /* [R5] After disconnect, CLIENT should auto-reconnect */
+        if (ctx->config.role == PICC_ROLE_CLIENT) {
+            PICC_LinkSetState(ctx, PICC_LINK_STATE_CONNECTING);
+            ctx->periodCounter = 0U;
+            ctx->backoffCounter = 0U;
         }
 
-        if (idMatch == FALSE) {
-            /* Not for this connection pair, ignore silently */
-            return 0;
-        }
-
-        if (linkPayload->subType == (uint8)PICC_LINK_DISCONNECT) {
-            
-            /* [R5] Received disconnect notification (ReturnCode usually 0x01) */
-            /* 1. Set state to disconnected */
-            PICC_LinkSetState(ctx, PICC_LINK_STATE_DISCONNECTED);
-            
-            /* 2. Reply disconnect confirmation (ReturnCode=0x00) */
-            /* Note: consumerId(from header)->ProviderID, providerId(from header)->ConsumerID */
-            /* But LinkSendMessage is (ProviderID, ConsumerID...) */
-            /* If I am Client: Header Provider=Server, Consumer=Me. Reply Provider=Me(Client?), Consumer=Server. */
-            /* Protocol says: */
-            /* Client replies Disconnect Confirmation: ProviderID=Client(0xCD?), ConsumerID=Server(0xC9?) - wait diagram numbers. */
-            /* Diagram: 
-               Server Send Disconnect: ProviderID=0xCD(Server), ConsumerID=0xC9(Client).
-               Client Reply Confirm:   ProviderID=0xCD(Server), ConsumerID=0xC9(Client). ReturnCode=0x00. Payload[0]=0x02. 
-               Wait, the diagram shows the SAME ProviderID/ConsumerID header for the reply?
-               Check Diagram carefully:
-               Request: CD 00 C9 ... ReturnCode 01
-               Reply:   CD 00 C9 ... ReturnCode 00
-               Both have ProviderID=CD(Server), ConsumerID=C9(Client).
-               Only ReturnCode changes.
-               
-               Means: The header fields ProviderID/ConsumerID identify the SESSION connection, NOT the direction of the specific packet sender?
-               OR The diagram notation is: ProviderID=ServerID, ConsumerID=ClientID.
-               
-               Let's check standard Request/Response:
-               Request: CE 03 D2 ...
-               Response: CE 03 D2 ...
-               Yes, ProviderID and ConsumerID seem stable for the pairing.
-               
-               So when calling PICC_LinkSendMessage:
-               ProviderID should always be the Server's ID?
-               ConsumerID should always be the Client's ID?
-               
-               Caller: PICC_LinkSendMessage(providerId, consumerId, ...)
-               
-               If I am Client (M-Core):
-               My ID = ctx->config.localId (ConsumerID).
-               Remote ID = ctx->config.remoteId (ProviderID).
-               
-               When I reply, I should keep ProviderID=Remote, ConsumerID=Local.
-            */
-            
-            sint8 sendRet = PICC_LinkSendMessage(header->providerId,  /* Keep Provider ID */
-                                                 header->consumerId,  /* Keep Consumer ID */
-                                                 PICC_LINK_DISCONNECT,
-                                                 (uint8)PICC_RET_OK,  /* Confirm: 0x00 */
-                                                 instanceId, channelId);
-
-            /* [R5] After disconnect, CLIENT should auto-reconnect */
-            if (ctx->config.role == PICC_ROLE_CLIENT) {
-                /* Set to CONNECTING state, timer will handle reconnection */
-                PICC_LinkSetState(ctx, PICC_LINK_STATE_CONNECTING);
-            }
-
-        } else if (linkPayload->subType == (uint8)PICC_LINK_RECONNECT) {
-            PICC_LinkSetState(ctx, PICC_LINK_STATE_DISCONNECTED);
-            if (ctx->config.role == PICC_ROLE_CLIENT) {
-                /* No need to call SendRequest immediately, timer will handle it */
-                PICC_LinkSetState(ctx, PICC_LINK_STATE_CONNECTING);
-            }
+    } else if (linkPayload->subType == (uint8)PICC_LINK_RECONNECT) {
+        PICC_LinkSetState(ctx, PICC_LINK_STATE_DISCONNECTED);
+        if (ctx->config.role == PICC_ROLE_CLIENT) {
+            PICC_LinkSetState(ctx, PICC_LINK_STATE_CONNECTING);
+            ctx->periodCounter = 0U;
+            ctx->backoffCounter = 0U;
         }
     }
 
@@ -608,38 +549,70 @@ sint8 PICC_LinkHandleDisconnect(const PICC_MsgHeader_t *header,
 }
 
 /**
- * @brief Get current connection state for specified channel
+ * @brief Get current connection state for physical channel (heartbeat-based)
+ *
+ * Returns CONNECTED if the heartbeat on the specified channel is alive
+ * (miss count < timeout threshold), DISCONNECTED otherwise.
+ *
+ * @note This is for physical channel health, NOT for per-app connection state.
+ *       Use PICC_LinkGetStateByIds() for per-app state.
  */
 PICC_LinkState_e PICC_LinkGetState(uint8 channelId)
 {
-    uint32 i;
-    
-    for (i = 0U; i < PICC_MAX_CHANNELS; i++) {
-        if (g_linkContexts[i].config.isUsed && 
-            g_linkContexts[i].config.channelId == channelId) {
-            return g_linkContexts[i].state;
-        }
+    uint8 missCount;
+
+    missCount = PICC_HeartbeatGetMissCount(IPCF_INSTANCE0, channelId);
+    if (missCount < PICC_HEARTBEAT_TIMEOUT_COUNT) {
+        return PICC_LINK_STATE_CONNECTED;
     }
     return PICC_LINK_STATE_DISCONNECTED;
 }
 
 /**
- * @brief Trigger reconnect on specified channel (called by heartbeat on timeout)
- * 
- * [R6] On heartbeat timeout:
- * 1. CLIENT: Set to CONNECTING state to trigger auto reconnect
- * 2. SERVER: Set to DISCONNECTED state and wait for CLIENT to reconnect
+ * @brief Get application-level link state by ID pair
+ *
+ * @param[in] localId  Local ID (ProviderID for Server, ConsumerID for Client)
+ * @param[in] remoteId Remote ID (peer's ID)
+ * @return Connection state for the specified app pair
+ */
+PICC_LinkState_e PICC_LinkGetStateByIds(uint8 localId, uint8 remoteId)
+{
+    PICC_LinkContext_t *ctx = PICC_GetLinkContextByIds(localId, remoteId);
+    if (ctx != NULL) {
+        return ctx->state;
+    }
+    return PICC_LINK_STATE_DISCONNECTED;
+}
+
+/**
+ * @brief Trigger reconnect on all apps on specified channel (called by heartbeat on timeout)
+ *
+ * [R6] On heartbeat timeout, the physical channel is considered faulty.
+ * All apps on that channel must transition:
+ *   - CLIENT: Set to CONNECTING state to trigger auto reconnect
+ *   - SERVER: Set to DISCONNECTED state and wait for CLIENT to reconnect
  */
 void PICC_LinkTriggerReconnect(uint8 instanceId, uint8 channelId)
 {
-    PICC_LinkContext_t *ctx = PICC_GetLinkContext(instanceId, channelId);
-    if (ctx != NULL) {
-        /* [FIX] Only CLIENT should enter CONNECTING state on heartbeat timeout.
-         * SERVER should stay in DISCONNECTED and wait for CLIENT to send
-         * connection requests.
-         */
+    uint32 i;
+    PICC_LinkContext_t *ctx;
+
+    (void)instanceId;
+
+    for (i = 0U; i < PICC_MAX_LINK_APPS; i++) {
+        ctx = &g_linkContexts[i];
+
+        if (ctx->config.isUsed == FALSE) {
+            continue;
+        }
+        if (ctx->config.channelId != channelId) {
+            continue;
+        }
+
         if (ctx->config.role == PICC_ROLE_CLIENT) {
             PICC_LinkSetState(ctx, PICC_LINK_STATE_CONNECTING);
+            ctx->periodCounter = 0U;
+            ctx->backoffCounter = 0U;
         } else {
             /* SERVER: Set to DISCONNECTED, wait for CLIENT to reconnect */
             PICC_LinkSetState(ctx, PICC_LINK_STATE_DISCONNECTED);
@@ -648,7 +621,11 @@ void PICC_LinkTriggerReconnect(uint8 instanceId, uint8 channelId)
 }
 
 /**
- * @brief Process received link management message
+ * @brief Process received link management message (dispatch by subType)
+ *
+ * Finds the target app context by matching ProviderID/ConsumerID from the
+ * message header, then dispatches to the appropriate handler based on the
+ * link subType and the app's role.
  */
 sint8 PICC_LinkProcessMessage(const PICC_MsgHeader_t *header,
                               const uint8 *payload, uint16 len,
@@ -671,24 +648,25 @@ sint8 PICC_LinkProcessMessage(const PICC_MsgHeader_t *header,
 
     linkPayload = (const PICC_LinkPayload_t *)payload;
 
-    ctx = PICC_GetLinkContext(instanceId, channelId);
+    /* Find matching app context by header IDs */
+    ctx = PICC_GetLinkContextByHeader(header->providerId, header->consumerId, channelId);
     if (ctx == NULL) {
-        /* Context not found for this channel, ignore */
+        /* No matching app registered for this ProviderID/ConsumerID pair, ignore */
         return 0;
     }
 
     switch (linkPayload->subType) {
-        case PICC_LINK_CONNECT:
+        case (uint8)PICC_LINK_CONNECT:
             if (ctx->config.role == PICC_ROLE_SERVER) {
-                /* Server receives Connection Request */
+                /* Server receives Connection Request from A-Core Client */
                 return PICC_LinkHandleRequest(header, payload, len, instanceId, channelId);
             } else {
-                /* Client receives Connection Response */
+                /* Client receives Connection Response from A-Core Server */
                 return PICC_LinkHandleResponse(header, payload, len, instanceId, channelId);
             }
 
-        case PICC_LINK_DISCONNECT:
-        case PICC_LINK_RECONNECT:
+        case (uint8)PICC_LINK_DISCONNECT:
+        case (uint8)PICC_LINK_RECONNECT:
             return PICC_LinkHandleDisconnect(header, payload, len, instanceId, channelId);
 
         default:
@@ -702,4 +680,3 @@ sint8 PICC_LinkProcessMessage(const PICC_MsgHeader_t *header,
 #if defined(__cplusplus)
 }
 #endif
-

@@ -113,19 +113,15 @@ sint8 PICC_Init(PICC_AppIndex_e appIndex, const PICC_AppConfig_t *config)
         return ret;
     }
 
-    /* 2. Register Link */
+    /* 2. Register Link (per-app, does NOT clear other apps' contexts) */
     linkCfg.localId    = config->localId;
     linkCfg.remoteId   = config->remoteId;
     linkCfg.role       = config->role;
     linkCfg.channelId  = config->channelId;
     linkCfg.instanceId = IPCF_INSTANCE0;
+    linkCfg.Client_linkReq_PeriodMs = config->Client_linkReq_PeriodMs;
     linkCfg.isUsed     = TRUE;
-    ret = PICC_LinkInit(&linkCfg);
-    if (ret != 0) {
-        PICC_MailboxUnregisterApp(appIndex);
-        return ret;
-    }
-    ret = PICC_LinkAddChannel(IPCF_INSTANCE0, config->channelId);
+    ret = PICC_LinkRegisterApp(&linkCfg);
     if (ret != 0) {
         PICC_MailboxUnregisterApp(appIndex);
         return ret;
@@ -166,7 +162,7 @@ sint8 PICC_SendEvent(PICC_AppIndex_e appIndex, uint8 eventId,
         return PICC_E_PARAM;
     }
 
-    if (PICC_LinkGetState(cfg->channelId) != PICC_LINK_STATE_CONNECTED) {
+    if (PICC_LinkGetStateByIds(cfg->localId, cfg->remoteId) != PICC_LINK_STATE_CONNECTED) {
         return PICC_E_NOT_CONNECTED;
     }
 
@@ -193,7 +189,7 @@ uint8 PICC_MethodRequest(PICC_AppIndex_e appIndex, uint8 methodId,
         return 0U;
     }
 
-    if (PICC_LinkGetState(cfg->channelId) != PICC_LINK_STATE_CONNECTED) {
+    if (PICC_LinkGetStateByIds(cfg->localId, cfg->remoteId) != PICC_LINK_STATE_CONNECTED) {
         return 0U;
     }
 
@@ -317,22 +313,30 @@ sint8 PICC_GetEventData(PICC_AppIndex_e appIndex, uint8 eventId,
  *==================================================================================================*/
 
 /**
- * @brief Get the current IPCF channel connection state
- *
- * Indicates whether the underlying IPCF link is disconnected, connecting,
- * or connected.
- *
- * This is the public polling API for application code that wants to inspect
- * link state explicitly. PICC send APIs already perform their own internal
- * link-state validation before transmitting.
- *
- * @param[in] channelId IPCF Channel ID
- *
- * @return Current link state for the specified channel
+ * @brief Get the physical channel health state (heartbeat-based)
  */
 PICC_LinkState_e PICC_GetLinkState(uint8 channelId)
 {
     return PICC_LinkGetState(channelId);
+}
+
+/**
+ * @brief Get the application-level link connection state (per-app)
+ *
+ * Looks up the app's (localId, remoteId) from its registration config,
+ * then queries the link layer for that specific pair's connection state.
+ */
+PICC_LinkState_e PICC_GetAppLinkState(PICC_AppIndex_e appIndex)
+{
+    const PICC_AppConfig_t *cfg;
+    sint8 ret;
+
+    ret = PICC_MailboxGetAppConfig(appIndex, &cfg);
+    if (ret != PICC_E_OK) {
+        return PICC_LINK_STATE_DISCONNECTED;
+    }
+
+    return PICC_LinkGetStateByIds(cfg->localId, cfg->remoteId);
 }
 
 #if defined(__cplusplus)
