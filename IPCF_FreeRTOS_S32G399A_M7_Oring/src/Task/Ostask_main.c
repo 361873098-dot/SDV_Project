@@ -142,6 +142,11 @@ void TASK_M0_10MS(void)
 
     /* Power State Machine */
     Pwsm_Main();
+
+#if (PICC_DIAG_RECORD_ENABLE == 1U)
+    /* Update link state diagnostics (appLinkState + channelLinkState) */
+    PICC_DiagUpdateLinkState();
+#endif
 }
 
 /**

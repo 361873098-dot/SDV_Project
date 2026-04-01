@@ -131,6 +131,8 @@ typedef struct {
 typedef struct {
     PICC_DiagRecord_t tx;  /**< TX diagnostic buffer */
     PICC_DiagRecord_t rx;  /**< RX diagnostic buffer */
+    uint8 appLinkState[PICC_APP_MAX];       /**< Per-app link state (index=PICC_AppIndex_e, value=PICC_LinkState_e) */
+    uint8 channelLinkState[PICC_MAX_CHANNELS]; /**< Per-channel link state (index=0..1 => channelId 1..2) */
 } PICC_ChannelDiag_t;
 
 PICC_ChannelDiag_t g_diagRecord_Debug;
@@ -259,6 +261,33 @@ static void PICC_DiagRecordAdd(PICC_DiagRecord_t *record, const uint8 *data, uin
 void PICC_DiagRecordAddTx(const uint8 *data, uint32 len)
 {
     PICC_DiagRecordAdd(&g_diagRecord_Debug.tx, data, len);
+}
+
+/**
+ * @brief Update link state diagnostic fields in g_diagRecord_Debug
+ *
+ * Reads current app-level link state (per PICC_AppIndex_e) and
+ * channel-level link state (channelId 1 and 2) into the diagnostic
+ * structure, so TRACE32 can inspect them via:
+ *   Var.View g_diagRecord_Debug.appLinkState
+ *   Var.View g_diagRecord_Debug.channelLinkState
+ *
+ * Values: 0=DISCONNECTED, 1=CONNECTING, 2=CONNECTED
+ *
+ * Called from TASK_M0_10MS() periodic task.
+ */
+void PICC_DiagUpdateLinkState(void)
+{
+    uint8 i;
+
+    /* Update per-app link states */
+    for (i = 0U; i < (uint8)PICC_APP_MAX; i++) {
+        g_diagRecord_Debug.appLinkState[i] = (uint8)PICC_GetAppLinkState((PICC_AppIndex_e)i);
+    }
+
+    /* Update per-channel link states (channelId 1 and 2 mapped to index 0 and 1) */
+    g_diagRecord_Debug.channelLinkState[0] = (uint8)PICC_GetLinkState(1U);
+    g_diagRecord_Debug.channelLinkState[1] = (uint8)PICC_GetLinkState(2U);
 }
 #endif /* PICC_DIAG_RECORD_ENABLE */
 
@@ -478,6 +507,13 @@ void PICC_PreOS_Init(void)
     /* Initialize diagnostic record buffers */
     PICC_DiagRecordInit(&g_diagRecord_Debug.rx);
     PICC_DiagRecordInit(&g_diagRecord_Debug.tx);
+
+    /* Initialize link state diagnostic fields */
+    for (uint8 k = 0U; k < (uint8)PICC_APP_MAX; k++) {
+        g_diagRecord_Debug.appLinkState[k] = (uint8)PICC_LINK_STATE_DISCONNECTED;
+    }
+    g_diagRecord_Debug.channelLinkState[0] = (uint8)PICC_LINK_STATE_DISCONNECTED;
+    g_diagRecord_Debug.channelLinkState[1] = (uint8)PICC_LINK_STATE_DISCONNECTED;
 #endif
 
     /* ========================================================================

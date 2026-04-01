@@ -71,6 +71,15 @@ void PICC_handle_error(sint8 error, const char *file, int line);
  * @param[in] len     Data length
  */
 void PICC_DiagRecordAddTx(const uint8 *data, uint32 len);
+
+/**
+ * @brief Update link state diagnostic fields in g_diagRecord_Debug
+ *
+ * Reads current per-app link state and per-channel link state,
+ * stores them in g_diagRecord_Debug for TRACE32 inspection.
+ * Values: 0=DISCONNECTED, 1=CONNECTING, 2=CONNECTED
+ */
+void PICC_DiagUpdateLinkState(void);
 #endif
 
 #if defined(__cplusplus)

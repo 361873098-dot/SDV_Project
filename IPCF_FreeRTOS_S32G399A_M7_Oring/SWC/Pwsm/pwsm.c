@@ -50,6 +50,10 @@ static uint16 Pwsm_RxMsgTimeOutId2 = 0U;
 static uint16 Pwsm_RxMsgTimeOutId8 = 0U;
 static uint16 Pwsm_RxMsgTimeOutId11 = 0U;
 
+PICC_LinkState_e link_state_pwsw;
+PICC_LinkState_e link_state_Ota;
+
+
 /***********************************************************************************************************************
 *  global function definitions
 ***********************************************************************************************************************/
@@ -70,12 +74,30 @@ void Pwsm_Init(void)
         .remoteId          = PWR_CONSUMER_ID,     /* 0x06 */
         .role              = PICC_ROLE_SERVER,
         .channelId         = PWR_CHANNEL_ID,      /* 2 */
+        .Client_linkReq_PeriodMs = 0,             /* SERVER: not used */
         .methodHandler     = NULL,  /* Pure polling mode, no callback needed */
         .eventHandler      = NULL   /* Pure polling mode, no callback needed */
     };
     
     (void)PICC_Init(PICC_APP_PWR, &cfg);
 }
+
+void OTA_Init(void)
+{
+    static const PICC_AppConfig_t cfg = {
+        .localId           = 2,     /* 0x02 */
+        .remoteId          = 7,     /* 0x07 */
+        .role              = PICC_ROLE_SERVER,
+        .channelId         = PWR_CHANNEL_ID,      /* 2 */
+        .Client_linkReq_PeriodMs = 0,             /* SERVER: not used */
+        .methodHandler     = NULL,  /* Pure polling mode, no callback needed */
+        .eventHandler      = NULL   /* Pure polling mode, no callback needed */
+    };
+    
+    (void)PICC_Init(PICC_APP_OTA, &cfg);
+}
+
+
 
 /***********************************************************************************************************************
  *  Function name    : Pwsm_CommEvent()
@@ -195,6 +217,10 @@ void Pwsm_Main(void)
 
         case PWSM_STATE_RUN:
             Igk_Status = Pwsm_GetIgkStatus();
+
+		link_state_pwsw =PICC_GetAppLinkState(PICC_APP_PWR);
+		
+		link_state_Ota =PICC_GetAppLinkState(PICC_APP_OTA);
 
             if(!Igk_Status)
             {
