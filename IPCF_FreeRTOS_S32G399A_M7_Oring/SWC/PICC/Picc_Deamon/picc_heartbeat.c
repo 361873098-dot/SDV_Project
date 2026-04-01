@@ -117,7 +117,10 @@ void PICC_HeartbeatProcess(void)
                 if (g_timeoutCallback != NULL) {
                     g_timeoutCallback(ctx->instanceId, ctx->channelId);
                 }
-                ctx->missCount = 0U;  /* Reset after notification */
+                /* Keep at threshold to maintain DISCONNECTED state.
+                 * Only PICC_HeartbeatReset() (on Pong received) resets to 0.
+                 * Capping prevents uint8 overflow. */
+                ctx->missCount = PICC_HEARTBEAT_TIMEOUT_COUNT;
             }
         }
     }
