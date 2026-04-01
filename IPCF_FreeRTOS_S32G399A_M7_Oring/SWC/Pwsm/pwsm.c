@@ -94,7 +94,7 @@ void OTA_Init(void)
         .eventHandler      = NULL   /* Pure polling mode, no callback needed */
     };
     
-    (void)PICC_Init(PICC_APP_OTA, &cfg);
+    (void)PICC_Init(PICC_APP_DIAG, &cfg);
 }
 
 
