@@ -131,8 +131,8 @@ typedef struct {
 typedef struct {
     PICC_DiagRecord_t tx;  /**< TX diagnostic buffer */
     PICC_DiagRecord_t rx;  /**< RX diagnostic buffer */
-    uint8 appLinkState[PICC_APP_MAX];       /**< Per-app link state (index=PICC_AppIndex_e, value=PICC_LinkState_e) */
-    uint8 channelLinkState[PICC_MAX_CHANNELS]; /**< Per-channel link state (index=0..1 => channelId 1..2) */
+    PICC_LinkState_e appLinkState[PICC_APP_MAX];       /**< Per-app link state (index=PICC_AppIndex_e, value=PICC_LinkState_e) */
+    PICC_LinkState_e  channelLinkState[PICC_MAX_CHANNELS]; /**< Per-channel link state (index=0..1 => channelId 1..2) */
 } PICC_ChannelDiag_t;
 
 PICC_ChannelDiag_t g_diagRecord_Debug;
@@ -282,12 +282,12 @@ void PICC_DiagUpdateLinkState(void)
 
     /* Update per-app link states */
     for (i = 0U; i < (uint8)PICC_APP_MAX; i++) {
-        g_diagRecord_Debug.appLinkState[i] = (uint8)PICC_GetAppLinkState((PICC_AppIndex_e)i);
+        g_diagRecord_Debug.appLinkState[i] = PICC_GetAppLinkState((PICC_AppIndex_e)i);
     }
 
     /* Update per-channel link states (channelId 1 and 2 mapped to index 0 and 1) */
-    g_diagRecord_Debug.channelLinkState[0] = (uint8)PICC_GetLinkState(1U);
-    g_diagRecord_Debug.channelLinkState[1] = (uint8)PICC_GetLinkState(2U);
+    g_diagRecord_Debug.channelLinkState[0] = PICC_GetLinkState(1U);
+    g_diagRecord_Debug.channelLinkState[1] = PICC_GetLinkState(2U);
 }
 #endif /* PICC_DIAG_RECORD_ENABLE */
 

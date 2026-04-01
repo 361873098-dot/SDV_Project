@@ -195,7 +195,7 @@ sint8 PICC_HeartbeatAddChannel(uint8 instanceId, uint8 channelId)
     
     g_hbContexts[freeSlot].instanceId = instanceId;
     g_hbContexts[freeSlot].channelId = channelId;
-    g_hbContexts[freeSlot].missCount = 0U;
+    g_hbContexts[freeSlot].missCount = PICC_HEARTBEAT_TIMEOUT_COUNT;  /* Start as DISCONNECTED until first Pong */
     g_hbContexts[freeSlot].isUsed = TRUE;
     
     return 0;
