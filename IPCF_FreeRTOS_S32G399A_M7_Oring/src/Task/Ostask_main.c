@@ -45,6 +45,7 @@ extern "C"{
 #include "picc_heartbeat.h"          /* PICC_HeartbeatProcess()                  */
 #include "picc_link.h"               /* PICC_LinkProcess()                       */
 #include "pwsm.h"                    /* Pwsm_Main()                             */
+#include "diag_mgmt.h"               /* DiagMgmt_Main()                         */
 #include "System_Cpuload.h"          /* EcuM_Diag_Update()                       */
 
 /* Event-driven task declaration */
@@ -142,6 +143,9 @@ void TASK_M0_10MS(void)
 
     /* Power State Machine */
     Pwsm_Main();
+
+    /* Diagnostic Management: DoIP activation line status (30ms period) */
+    DiagMgmt_Main();
 
 #if (PICC_DIAG_RECORD_ENABLE == 1U)
     /* Update link state diagnostics (appLinkState + channelLinkState) */

@@ -1,0 +1,21 @@
+; ============================================================================
+; diag_mgmt_verify.cmm
+; Purpose: Verify DiagMgmt state (compatible with both old and new code)
+; ============================================================================
+
+AREA.Create DIAG_VERIFY
+AREA.Select DIAG_VERIFY
+AREA.Clear DIAG_VERIFY
+AREA.view DIAG_VERIFY
+
+PRINT "===== DiagMgmt Verification ====="
+PRINT ""
+
+PRINT "  Test_input       = " Var.VALUE(Test_input)
+PRINT "  appLinkState[8]  = " Var.VALUE(g_diagRecord_Debug.appLinkState[8])
+PRINT "  tx.totalRecords  = " Var.VALUE(g_diagRecord_Debug.tx.totalRecords)
+PRINT ""
+
+PRINT "===== DONE ====="
+
+ENDDO

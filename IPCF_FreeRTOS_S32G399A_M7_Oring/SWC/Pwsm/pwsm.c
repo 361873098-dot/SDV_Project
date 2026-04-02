@@ -128,7 +128,7 @@ void Pwsm_CommEvent(void)
         (void)PICC_SendEvent(PICC_APP_PWR, PWR_EVENT_STATE_NOTIFY, payload, 1U, PICC_EVENT_WITH_ACK);
         Pwsm_RxMsgTimeOutId2 = 0U;
         Pwsm_RxMsgTimeOutId8 = 0U;
-        Pwsm_MsgState = PWSM_STATE_MSG_TX_ID1;
+        Pwsm_MsgState = PWSM_STATE_MSG_RX_ID2;
         break;
     }
 
@@ -263,7 +263,7 @@ void Pwsm_Main(void)
             else
             {           
                 /*Release wake up*/
-               // Pwsm_WriteWakeup(STD_LOW);
+                Pwsm_WriteWakeup(STD_LOW);
             }
         break;
 

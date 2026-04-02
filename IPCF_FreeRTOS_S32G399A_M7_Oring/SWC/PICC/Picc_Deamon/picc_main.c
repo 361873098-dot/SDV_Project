@@ -218,14 +218,7 @@ static void PICC_DiagRecordAdd(PICC_DiagRecord_t *record, const uint8 *data, uin
             continue;
         }
 
-		/* Only record Power Management messages.
-           Power Management uses ProviderID=0x01, ConsumerID=0x06 (or 0x07).
-           This strictly filters out everything else. */
-        if (!(((msgPtr[0] == 0x01U) && (msgPtr[2] == 0x06U)) || 
-              ((msgPtr[0] == 0x02U) && (msgPtr[2] == 0x07U)))) {
-            offset += msgLen;
-            continue;
-        }
+
 
         /* Store this protocol message in a new row */
         row = record->currentRow;
