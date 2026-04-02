@@ -38,9 +38,6 @@ extern "C"{
 #endif
 
 void Pwsm_Init(void);
-
-void OTA_Init(void);
-
 void Pwsm_Main(void);
 
 

@@ -43,16 +43,12 @@
 ***********************************************************************************************************************/
 
 static volatile Pwsm_StateType Pwsm_State = PWSM_STATE_NO_INIT; /**< Holds the current PWSM state. */
-static volatile Pwsm_MsgStateType Pwsm_MsgState = PWSM_STATE_MSG_TX_ID1;	/**< Holds the current PWSM MSG state. */
-
+static volatile Pwsm_MsgStateType Pwsm_MsgState = PWSM_MSG_STATE_IDLE;	/**< Holds the current PWSM MSG state. */
+static uint8 Pwsm_RstReq = FALSE;
 static uint16 Pwsm_ShutdownTimer = 0U;
 static uint16 Pwsm_RxMsgTimeOutId2 = 0U;
 static uint16 Pwsm_RxMsgTimeOutId8 = 0U;
 static uint16 Pwsm_RxMsgTimeOutId11 = 0U;
-
-PICC_LinkState_e link_state_pwsw;
-PICC_LinkState_e link_state_Ota;
-
 
 /***********************************************************************************************************************
 *  global function definitions
@@ -60,7 +56,8 @@ PICC_LinkState_e link_state_Ota;
 uint8 Igk_Status = 1;
 uint8 McuRst = 0;
 
-
+uint8 buf[8];
+uint16 len;
 /***********************************************************************************************************************
  *  Function name    : Pwsm_Init()
  *
@@ -74,30 +71,25 @@ void Pwsm_Init(void)
         .remoteId          = PWR_CONSUMER_ID,     /* 0x06 */
         .role              = PICC_ROLE_SERVER,
         .channelId         = PWR_CHANNEL_ID,      /* 2 */
-        .Client_linkReq_PeriodMs = 0,             /* SERVER: not used */
         .methodHandler     = NULL,  /* Pure polling mode, no callback needed */
         .eventHandler      = NULL   /* Pure polling mode, no callback needed */
     };
     
-    (void)PICC_Init(PICC_APP_PWR, &cfg);
-}
-
-void OTA_Init(void)
-{
-    static const PICC_AppConfig_t cfg = {
-        .localId           = 2,     /* 0x02 */
-        .remoteId          = 7,     /* 0x07 */
+    static const PICC_AppConfig_t dm_cfg = {
+        .localId           = DM_PROVIDER_ID,     /* 0x02 */
+        .remoteId          = DM_CONSUMER_ID,     /* 0x07 */
         .role              = PICC_ROLE_SERVER,
         .channelId         = PWR_CHANNEL_ID,      /* 2 */
-        .Client_linkReq_PeriodMs = 0,             /* SERVER: not used */
         .methodHandler     = NULL,  /* Pure polling mode, no callback needed */
         .eventHandler      = NULL   /* Pure polling mode, no callback needed */
     };
-    
-    (void)PICC_Init(PICC_APP_DIAG, &cfg);
+
+
+    (void)PICC_Init(PICC_APP_PWR, &cfg);
+    (void)PICC_Init(PICC_APP_DIAG, &dm_cfg);
+
+
 }
-
-
 
 /***********************************************************************************************************************
  *  Function name    : Pwsm_CommEvent()
@@ -107,20 +99,36 @@ void OTA_Init(void)
  ***********************************************************************************************************************/
 void Pwsm_CommEvent(void)
 {
-    uint8 buf[8];
-    uint16 len;
+
 
     switch (Pwsm_MsgState)
     {
+    case PWSM_MSG_STATE_IDLE:
+    {
+    	Igk_Status = Pwsm_GetIgkStatus();
+        if(!Igk_Status)
+        {
+        	Pwsm_MsgState = PWSM_STATE_MSG_TX_ID1;
+        }
+        else if (PICC_GetMethodData(PICC_APP_DIAG, PWR_METHOD_STATE_RESET, buf, sizeof(buf), &len, NULL, NULL) == PICC_E_OK)
+    	{
+    		if (len == 2U && buf[0] == PWR_CORE_A &&  buf[1] == PWR_STATE_RESET)
+    		{
+    			Pwsm_MsgState = PWSM_STATE_MSG_TX_ID1;
+    			Pwsm_RstReq = TRUE;
+    		}
+    	}
+        break;
+    }
+
     case PWSM_STATE_MSG_TX_ID1:
     {
         /* Send Event ID 0x01 (PWR_EVENT_STATE_NOTIFY) */
         uint8 payload[1] = { (uint8)PWR_STATE_STANDBY };
-        (void)PICC_SendEvent(PICC_APP_PWR, PWR_EVENT_STATE_NOTIFY,
-                             payload, 1U, PICC_EVENT_WITH_ACK);
+        (void)PICC_SendEvent(PICC_APP_PWR, PWR_EVENT_STATE_NOTIFY, payload, 1U, PICC_EVENT_WITH_ACK);
         Pwsm_RxMsgTimeOutId2 = 0U;
         Pwsm_RxMsgTimeOutId8 = 0U;
-        Pwsm_MsgState = PWSM_STATE_MSG_RX_ID2;
+        Pwsm_MsgState = PWSM_STATE_MSG_TX_ID1;
         break;
     }
 
@@ -216,12 +224,14 @@ void Pwsm_Main(void)
         break;
 
         case PWSM_STATE_RUN:
-            Igk_Status = Pwsm_GetIgkStatus();
 
-		link_state_pwsw =PICC_GetAppLinkState(PICC_APP_PWR);
-		
-		link_state_Ota =PICC_GetAppLinkState(PICC_APP_OTA);
-
+            /*Send Event/Method 0x01 to A core to prepare shutdown*/
+            Pwsm_CommEvent();
+            if((Pwsm_MsgState == PWSM_STATE_MSG_SHUTDOWN_DONE) || (Pwsm_MsgState == PWSM_MSG_STATE_NO_RESPONSE))
+            {
+                Pwsm_State = PWSM_STATE_POST_RUN;
+            }
+#if 0
             if(!Igk_Status)
             {
                 /*Send Event/Method 0x01 to A core to prepare shutdown*/
@@ -231,6 +241,7 @@ void Pwsm_Main(void)
                     Pwsm_State = PWSM_STATE_POST_RUN;
                 }
             }
+#endif
         break;
 
         case PWSM_STATE_POST_RUN:
@@ -245,10 +256,14 @@ void Pwsm_Main(void)
             {
                 Pwsm_ShutdownTimer++;
             }
+            else if(Pwsm_RstReq)
+            {
+            	Mcu_PerformReset();
+            }
             else
             {           
                 /*Release wake up*/
-                Pwsm_WriteWakeup(STD_LOW);
+               // Pwsm_WriteWakeup(STD_LOW);
             }
         break;
 

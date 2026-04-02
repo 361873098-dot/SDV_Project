@@ -31,6 +31,8 @@ extern "C" {
 /** Maximum supported Stack channel count */
 #define PICC_STACK_MAX_INSTANCES (2U)
 
+#define PICC_DEBUG_TRACE	(0U)
+
 /** Stack instance structure */
 typedef struct {
     PICC_StackConfig_t  config;       /**< Configuration */
@@ -373,7 +375,6 @@ sint8 PICC_StackProcessRx(const uint8 *data, uint32 len,
     uint16 rxCounter;
     uint16 crcReceived;
     uint16 crcCalculated;
-    uint32 payloadLen;
     uint32 offset;
     uint32 counterOffset;
     PICC_MsgHeader_t header;
@@ -424,29 +425,49 @@ sint8 PICC_StackProcessRx(const uint8 *data, uint32 len,
     inst->context.rxCounter = rxCounter;
 
     /* Parse stacked messages */
-    /* Payload length = total - CRC_Enable(1B) - Counter(2B) - CRC16(2B) */
-    payloadLen = len - PICC_STACK_OVERHEAD_SIZE;
     offset = PICC_STACK_CRC_ENABLE_SIZE;  /* Start after CRC enable flag */
 
-    /* [R6] Check if heartbeat message (special format 9 bytes, no protocol header) */
-    if (payloadLen == PICC_HEARTBEAT_MSG_SIZE) {
-        const uint8 *heartbeatData = &data[offset];
-        if (PICC_HeartbeatIsPing(heartbeatData, PICC_HEARTBEAT_MSG_SIZE) != FALSE) {
-            /* Received Ping, reply Pong */
-            (void)PICC_HeartbeatHandlePing(instanceId, channelId);
-            return 1;  /* Processed 1 heartbeat message */
-        }
-        if (PICC_HeartbeatIsPong(heartbeatData, PICC_HEARTBEAT_MSG_SIZE) != FALSE) {
-            /* Received Pong, reset heartbeat count */
-            PICC_HeartbeatReset(instanceId, channelId);
-            return 1;  /* Processed 1 heartbeat message */
-        }
-    }
-
-    /* Parse protocol messages until reaching counter position */
+    /* Parse all messages (protocol + heartbeat) until reaching counter position.
+     *
+     * [FIX] Heartbeat detection is now INSIDE the loop, not a separate pre-check.
+     * Old code: "if (payloadLen == PICC_HEARTBEAT_MSG_SIZE)" only worked when
+     * heartbeat was the SOLE message in the stacked packet. When A-core stacks
+     * Ping with other protocol data (payloadLen > 9), the heartbeat was missed
+     * entirely, causing ~50% Pong frame loss.
+     *
+     * New approach: At each message boundary, first check for heartbeat pattern
+     * (starts with 0xFF, which is invalid for protocol ProviderID 0x01-0xFE),
+     * then fall through to protocol parsing if not a heartbeat.
+     */
     while (offset < counterOffset) {
-        /* Parse single message */
-        if (PICC_UnpackMessage(&data[offset], payloadLen, &header, &payload, &msgPayloadLen) == 0) {
+        uint32 remaining = counterOffset - offset;
+
+        /* [R6] Check heartbeat FIRST at each message boundary.
+         * Heartbeat format: 9 bytes starting with FF 00 FF 00 FF ...
+         * Protocol format: starts with ProviderID (0x01-0xFE), never 0xFF.
+         * So there is zero risk of false positive collision. */
+        if (remaining >= PICC_HEARTBEAT_MSG_SIZE) {
+            const uint8 *msgData = &data[offset];
+
+            if (PICC_HeartbeatIsPing(msgData, PICC_HEARTBEAT_MSG_SIZE) != FALSE) {
+                /* Received Ping, reply Pong */
+                (void)PICC_HeartbeatHandlePing(instanceId, channelId);
+                offset += PICC_HEARTBEAT_MSG_SIZE;
+                msgCount++;
+                continue;
+            }
+
+            if (PICC_HeartbeatIsPong(msgData, PICC_HEARTBEAT_MSG_SIZE) != FALSE) {
+                /* Received Pong, reset heartbeat count */
+                PICC_HeartbeatReset(instanceId, channelId);
+                offset += PICC_HEARTBEAT_MSG_SIZE;
+                msgCount++;
+                continue;
+            }
+        }
+
+        /* Not a heartbeat — parse as standard protocol message */
+        if (PICC_UnpackMessage(&data[offset], remaining, &header, &payload, &msgPayloadLen) == 0) {
             /* Calculate this message's total length */
             uint32 msgTotalLen = PICC_HEADER_SIZE + (uint32)msgPayloadLen;
 
@@ -454,13 +475,8 @@ sint8 PICC_StackProcessRx(const uint8 *data, uint32 len,
             if (g_stackMsgCallback != NULL) {
                 g_stackMsgCallback(&header, payload, msgPayloadLen, instanceId, channelId);
             }
-            
+
             offset += msgTotalLen;
-            /* Prevent underflow: check before subtraction */
-            if (msgTotalLen > payloadLen) {
-                break;
-            }
-            payloadLen -= msgTotalLen;
             msgCount++;
         } else {
             break;  /* Parse failed, stop */

@@ -73,7 +73,7 @@ static void App_Init_All(void)
 {
   /* Register application-level PICC endpoints after middleware is ready. */
   Pwsm_Init();
-  OTA_Init();
+  //OTA_Init();
 }
 
 /*==================================================================================================

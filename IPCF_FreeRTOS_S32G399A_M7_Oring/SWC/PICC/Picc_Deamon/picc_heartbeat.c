@@ -206,6 +206,12 @@ sint8 PICC_HeartbeatAddChannel(uint8 instanceId, uint8 channelId)
 
 /**
  * @brief Send heartbeat Ping [R6]
+ * 
+ * [FIX] Now flushes immediately after adding Ping to buffer (same as SendPong).
+ * Without flush, Ping stays in buffer and gets stacked with link/service data
+ * in the next PICC_StackProcess() cycle. If A-core uses similar heartbeat
+ * detection logic (payloadLen == 9), it would fail to detect a stacked Ping,
+ * causing M-core to miss Pong responses.
  */
 sint8 PICC_HeartbeatSendPing(uint8 instanceId, uint8 channelId)
 {
@@ -216,9 +222,22 @@ sint8 PICC_HeartbeatSendPing(uint8 instanceId, uint8 channelId)
 
     (void)instanceId;  /* Currently Stack uses fixed IPCF_INSTANCE0 */
 
-    /* Send through Stack layer */
+    /* Add Ping to stack buffer */
     ret = PICC_StackAddMessageToChannel(channelId, pingMsg, PICC_HEARTBEAT_MSG_SIZE);
-    /* Note: Don't PICC_HANDLE_ERROR here - Ping failures are normal when A-core is not ready */
+
+    /* [FIX] Handle buffer-full case (same pattern as SendPong) */
+    if (ret == -4) {
+        PICC_StackClearBuffer(channelId);
+        ret = PICC_StackAddMessageToChannel(channelId, pingMsg, PICC_HEARTBEAT_MSG_SIZE);
+    }
+
+    /* [FIX] Immediately flush to ensure Ping is sent as standalone packet.
+     * Heartbeat is only sent every 2000ms, so the overhead of an extra
+     * flush (vs waiting for next 10ms StackProcess) is negligible. */
+    if (ret == 0) {
+        (void)PICC_StackFlushChannel(channelId);
+    }
+
     return ret;
 }
 

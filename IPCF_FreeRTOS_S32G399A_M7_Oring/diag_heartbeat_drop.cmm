@@ -1,0 +1,92 @@
+; =============================================================================
+; diag_heartbeat_drop.cmm
+; Purpose: Diagnose heartbeat Pong frame loss by checking:
+;   1. g_piccTrace.rx - incoming RX data to see if Ping arrives stacked with other data
+;   2. g_appData.error_count - queue drop count
+;   3. Heartbeat miss counts for both channels
+;   4. g_rxQueue uxMessagesWaiting - queue depth
+;
+; Usage: Run in TRACE32 while system is running
+; =============================================================================
+
+AREA.Create DIAG_HB
+AREA.Select DIAG_HB
+AREA.Clear DIAG_HB
+AREA.View DIAG_HB
+
+PRINT "============================================================"
+PRINT " Heartbeat Frame Drop Diagnostic"
+PRINT "============================================================"
+PRINT ""
+
+; --- 1. Check heartbeat miss counts for both channels ---
+PRINT "--- Heartbeat Miss Counts ---"
+PRINT "  Channel 1 (g_hbContexts[0]):"
+PRINT "    instanceId = " Var.VALUE(g_hbContexts[0].instanceId)
+PRINT "    channelId  = " Var.VALUE(g_hbContexts[0].channelId)
+PRINT "    missCount  = " Var.VALUE(g_hbContexts[0].missCount)
+PRINT "    isUsed     = " Var.VALUE(g_hbContexts[0].isUsed)
+PRINT "  Channel 2 (g_hbContexts[1]):"
+PRINT "    instanceId = " Var.VALUE(g_hbContexts[1].instanceId)
+PRINT "    channelId  = " Var.VALUE(g_hbContexts[1].channelId)
+PRINT "    missCount  = " Var.VALUE(g_hbContexts[1].missCount)
+PRINT "    isUsed     = " Var.VALUE(g_hbContexts[1].isUsed)
+PRINT ""
+
+; --- 2. Check error counts (queue overflows, etc.) ---
+PRINT "--- Application Error Counts ---"
+PRINT "  g_appData.rx_count    = " Var.VALUE(g_appData.rx_count)
+PRINT "  g_appData.tx_count    = " Var.VALUE(g_appData.tx_count)
+PRINT "  g_appData.error_count = " Var.VALUE(g_appData.error_count)
+PRINT "  g_appData.last_error  = " Var.VALUE(g_appData.last_error)
+PRINT "  g_appData.last_rx_ch  = " Var.VALUE(g_appData.last_rx_ch)
+PRINT ""
+
+; --- 3. Check RX trace buffer - look for stacked heartbeat+protocol data ---
+PRINT "--- Last 10 RX Trace Entries (g_piccTrace.rx) ---"
+PRINT "  writeIndex = " Var.VALUE(g_piccTrace.rx.writeIndex)
+PRINT ""
+PRINT "  Format: [ch][len][byte0 byte1 byte2 ...]"
+PRINT "  Heartbeat = byte0=0xFF; Protocol = byte0=ProviderID(0x01-0xFE)"
+PRINT ""
+
+; Show last 10 rows
+&idx=Var.VALUE(g_piccTrace.rx.writeIndex)
+&i=0
+WHILE &i<10.
+(
+  &row=&idx-1-&i
+  IF &row<0
+    &row=&row+20.
+  
+  PRINT "  Row[" FORMAT.DECIMAL(2,&row) "]: ch=" FORMAT.HEX(2,Var.VALUE(g_piccTrace.rx.data[&row][0])) " len=" FORMAT.DECIMAL(3,Var.VALUE(g_piccTrace.rx.data[&row][1])) " data=" FORMAT.HEX(2,Var.VALUE(g_piccTrace.rx.data[&row][2])) " " FORMAT.HEX(2,Var.VALUE(g_piccTrace.rx.data[&row][3])) " " FORMAT.HEX(2,Var.VALUE(g_piccTrace.rx.data[&row][4])) " " FORMAT.HEX(2,Var.VALUE(g_piccTrace.rx.data[&row][5])) " " FORMAT.HEX(2,Var.VALUE(g_piccTrace.rx.data[&row][6])) " " FORMAT.HEX(2,Var.VALUE(g_piccTrace.rx.data[&row][7])) " " FORMAT.HEX(2,Var.VALUE(g_piccTrace.rx.data[&row][8])) " " FORMAT.HEX(2,Var.VALUE(g_piccTrace.rx.data[&row][9]))
+  
+  &i=&i+1
+)
+PRINT ""
+
+; --- 4. Check Stack buffer state ---
+PRINT "--- Stack Buffer State ---"
+PRINT "  Channel 1 (g_stackInstances[0]):"
+PRINT "    usedSize   = " Var.VALUE(g_stackInstances[0].context.usedSize)
+PRINT "    txCounter  = " Var.VALUE(g_stackInstances[0].context.txCounter)
+PRINT "    rxCounter  = " Var.VALUE(g_stackInstances[0].context.rxCounter)
+PRINT "  Channel 2 (g_stackInstances[1]):"
+PRINT "    usedSize   = " Var.VALUE(g_stackInstances[1].context.usedSize)
+PRINT "    txCounter  = " Var.VALUE(g_stackInstances[1].context.txCounter)
+PRINT "    rxCounter  = " Var.VALUE(g_stackInstances[1].context.rxCounter)
+PRINT ""
+
+; --- 5. Check heartbeat timer counter ---
+PRINT "--- Heartbeat Timer ---"
+PRINT "  g_hbTimerCounter = " Var.VALUE(g_hbTimerCounter)
+PRINT ""
+
+PRINT "============================================================"
+PRINT " KEY FINDING: If RX trace shows non-heartbeat messages"
+PRINT " (byte0 != 0xFF) but g_hbContexts missCount is increasing,"
+PRINT " it confirms A-core is stacking Ping with other data,"
+PRINT " and the heartbeat detection in PICC_StackProcessRx() fails."
+PRINT "============================================================"
+
+ENDDO

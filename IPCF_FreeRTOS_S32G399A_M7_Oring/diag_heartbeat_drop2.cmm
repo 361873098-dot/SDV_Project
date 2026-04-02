@@ -1,0 +1,118 @@
+; =============================================================================
+; diag_heartbeat_drop2.cmm
+; Purpose: Set breakpoint on PICC_StackProcessRx to capture raw stacked packet
+;          and verify if heartbeat Ping is stacked with other protocol data.
+;
+; How it works:
+;   1. Set conditional breakpoint at PICC_StackProcessRx entry
+;   2. When hit, dump the raw incoming data to see stacked packet contents
+;   3. Check if Ping (FF 00 FF 00 FF 00 00 01 00) is mixed with other data
+;
+; Usage: Run in TRACE32, then wait for breakpoint to hit
+; =============================================================================
+
+AREA.Create DIAG_HB2
+AREA.Select DIAG_HB2
+AREA.Clear DIAG_HB2
+AREA.View DIAG_HB2
+
+; Set breakpoint at PICC_StackProcessRx, log the raw data pointer and length
+; We check the 'len' parameter - if len > 14 (5 overhead + 9 heartbeat),
+; AND data contains heartbeat pattern, it means heartbeat is stacked
+
+; First, let's look at the recent stack instance raw buffer to check
+; Channel 1 and Channel 2 input sizes
+PRINT "============================================================"
+PRINT " Raw Stacked Packet Analysis"
+PRINT " Looking for heartbeat stacked with protocol data"
+PRINT "============================================================"
+PRINT ""
+
+; Check the g_stackInstances rxCounter difference to estimate packet rate
+PRINT "--- Packet Rate Info ---"
+PRINT "  Channel 1 txCounter = " Var.VALUE(g_stackInstances[0].context.txCounter)
+PRINT "  Channel 1 rxCounter = " Var.VALUE(g_stackInstances[0].context.rxCounter)
+PRINT "  Channel 2 txCounter = " Var.VALUE(g_stackInstances[1].context.txCounter)
+PRINT "  Channel 2 rxCounter = " Var.VALUE(g_stackInstances[1].context.rxCounter)
+PRINT ""
+
+; Now set a temporary breakpoint on PICC_HeartbeatHandlePing to count calls
+; If this function is called less than expected, it means Pings are being missed
+PRINT "--- Setting read-only watch on PICC_HeartbeatHandlePing ---"
+PRINT " Check how many times HandlePing is called vs expected"
+PRINT ""
+
+; Set a breakpoint on the heartbeat detection condition in PICC_StackProcessRx
+; Line 434: if (payloadLen == PICC_HEARTBEAT_MSG_SIZE)
+; We want to see: was this condition ever FALSE when data contains heartbeat?
+;
+; Strategy: Break on PICC_HeartbeatHandlePing
+;   If it's called, the heartbeat was detected (standalone case)
+;   If NOT called for a long time but rxCounter keeps increasing, Pings are lost
+
+PRINT "--- Checking g_hbTimerCounter progression ---"
+PRINT "  g_hbTimerCounter = " Var.VALUE(g_hbTimerCounter)
+PRINT "  (counts 0-199, resets at 200 = 2000ms)"
+PRINT ""
+
+; Let's check the heartbeat context details more carefully
+PRINT "--- Heartbeat Context Deep Dive ---"
+PRINT "  CH1 missCount=" Var.VALUE(g_hbContexts[0].missCount) " channelId=" Var.VALUE(g_hbContexts[0].channelId) " isUsed=" Var.VALUE(g_hbContexts[0].isUsed)
+PRINT "  CH2 missCount=" Var.VALUE(g_hbContexts[1].missCount) " channelId=" Var.VALUE(g_hbContexts[1].channelId) " isUsed=" Var.VALUE(g_hbContexts[1].isUsed)
+PRINT ""
+
+; Check the task counters to verify 10ms task is running properly
+PRINT "--- Task Execution Counters ---"
+PRINT "  g_OsTask_10ms_cnt = " Var.VALUE(g_OsTask_10ms_cnt)
+PRINT "  g_appData.tx_count = " Var.VALUE(g_appData.tx_count) " (RX messages processed)"
+PRINT ""
+
+; Key analysis: dump the FIRST 20 bytes of g_stackInstances buffer for both channels
+; to see what data is currently pending in the TX buffer
+PRINT "--- Channel 1 Pending TX Buffer (first 20 bytes) ---"
+&used1=Var.VALUE(g_stackInstances[0].context.usedSize)
+PRINT "  usedSize = " &used1
+IF &used1>0
+(
+  PRINT "  buffer[0..19] = " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[0])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[1])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[2])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[3])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[4])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[5])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[6])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[7])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[8])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[9])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[10])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[11])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[12])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[13])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[14])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[15])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[16])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[17])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[18])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[0].context.buffer[19]))
+  PRINT "  >>> If starts with FF 00 FF = heartbeat STACKED with pending data!"
+)
+ELSE
+(
+  PRINT "  (empty)"
+)
+PRINT ""
+
+PRINT "--- Channel 2 Pending TX Buffer (first 20 bytes) ---"
+&used2=Var.VALUE(g_stackInstances[1].context.usedSize)
+PRINT "  usedSize = " &used2
+IF &used2>0
+(
+  PRINT "  buffer[0..19] = " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[0])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[1])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[2])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[3])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[4])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[5])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[6])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[7])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[8])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[9])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[10])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[11])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[12])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[13])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[14])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[15])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[16])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[17])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[18])) " " FORMAT.HEX(2,Var.VALUE(g_stackInstances[1].context.buffer[19]))
+  PRINT "  >>> If starts with FF 00 FF = heartbeat STACKED with pending data!"
+)
+ELSE
+(
+  PRINT "  (empty)"
+)
+
+PRINT ""
+PRINT "============================================================"
+PRINT " ANALYSIS SUMMARY"
+PRINT "============================================================"
+PRINT ""
+PRINT " The code bug is in picc_stack.c PICC_StackProcessRx():"
+PRINT "   Line 434: if (payloadLen == PICC_HEARTBEAT_MSG_SIZE)"
+PRINT ""
+PRINT " This condition ONLY detects heartbeat when it is the"
+PRINT " SOLE message in the stacked packet (payload exactly 9B)."
+PRINT " When A-core stacks Ping with other protocol data,"
+PRINT " payloadLen > 9 and the heartbeat is NEVER detected."
+PRINT ""
+PRINT " Additionally, M-core PICC_HeartbeatSendPing() does NOT"
+PRINT " flush immediately (unlike SendPong which does flush)."
+PRINT " This causes M-core Ping to be stacked with link/service"
+PRINT " data, and A-core may also fail to detect it."
+PRINT "============================================================"
+
+ENDDO

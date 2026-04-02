@@ -49,9 +49,11 @@ extern "C"{
 
 /** M-Core power master Provider ID */
 #define PWR_PROVIDER_ID             (1U)
+#define DM_PROVIDER_ID             (2U)
 
 /** A-Core power middleware Consumer ID */
 #define PWR_CONSUMER_ID             (6U)
+#define DM_CONSUMER_ID             (7U)
 
 /** A-Core identifier (for Payload) */
 #define PWR_CORE_A                  (3U)
@@ -62,6 +64,9 @@ extern "C"{
 
 /** Method IDs */
 #define PWR_METHOD_STATE_ACK        (2U)    /**< State acknowledgement */
+#define PWR_METHOD_STATE_RESET        (10U)    /**< State acknowledgement */
+
+
 #define PWR_METHOD_EVENT_DONE       (8U)    /**< Phase 1 completion */
 #define PWR_METHOD_CTRL_ACK         (11U)   /**< Control command ack */
 
@@ -110,7 +115,7 @@ PWSM_STATE_SHUTDOWN = ((uint8)0x15),
 
 typedef enum
 {
-PWSM_MSG_STATE_NO_INIT = ((uint8)0),
+PWSM_MSG_STATE_IDLE = ((uint8)0),
 PWSM_STATE_MSG_TX_ID1 = ((uint8)0x11),
 PWSM_STATE_MSG_RX_ID2 = ((uint8)0x12),
 PWSM_STATE_MSG_RX_ID8 = ((uint8)0x13),
